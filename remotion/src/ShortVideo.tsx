@@ -10,31 +10,36 @@ export const ShortVideo: React.FC<ShortVideoProps> = ({
   clipSrc,
   sourceWidth,
   sourceHeight,
+  layout,
   crop,
   cropKeyframes,
+  panels,
+  background,
   captions,
   captionStyle,
   hookLine1,
   hookLine2,
   showProgressBar,
-  durationInSeconds,
 }) => {
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
       {/* Load custom fonts for captions and hook overlay */}
       <style dangerouslySetInnerHTML={{ __html: fontFaceCSS }} />
 
-      {/* Reframed video (cropped and scaled to fill 1080x1920) */}
+      {/* Reframed video (cropped and scaled into the 1080x1920 frame) */}
       <VideoFrame
         clipSrc={clipSrc}
         sourceWidth={sourceWidth}
         sourceHeight={sourceHeight}
+        layout={layout}
         crop={crop}
         cropKeyframes={cropKeyframes}
+        panels={panels}
+        background={background}
       />
 
       {/* Animated captions */}
-      <Captions captions={captions} style={captionStyle} />
+      <Captions captions={captions} style={captionStyle} layout={layout} />
 
       {/* Hook text overlay (first 3.5 seconds) */}
       {(hookLine1 || hookLine2) && (
@@ -42,9 +47,7 @@ export const ShortVideo: React.FC<ShortVideoProps> = ({
       )}
 
       {/* Progress bar at bottom */}
-      {showProgressBar && (
-        <ProgressBar durationInSeconds={durationInSeconds} />
-      )}
+      {showProgressBar && <ProgressBar />}
     </AbsoluteFill>
   );
 };

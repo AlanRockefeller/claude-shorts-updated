@@ -1,4 +1,5 @@
 import { useCurrentFrame, useVideoConfig, spring, interpolate } from "remotion";
+import { SAFE } from "../styles/layout";
 
 interface HookOverlayProps {
   line1: string;
@@ -6,48 +7,43 @@ interface HookOverlayProps {
 }
 
 /**
- * Hook text overlay shown in the first 3.5 seconds.
+ * Hook text overlay shown in the first 3.5 seconds, placed below the
+ * platform header area so it is not covered by app UI.
+ *
  * Line 1: Large white text (main hook)
  * Line 2: Smaller cyan text (subtitle/context)
  *
- * Animation: Spring pop-in at 0.3s, fade-out at 3.0s
+ * Animation: Spring pop-in at 0.2s, fade-out at 3.0s
  */
 export const HookOverlay: React.FC<HookOverlayProps> = ({ line1, line2 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const currentTimeSec = frame / fps;
 
-  // Only show between 0.3s and 3.5s
-  if (currentTimeSec < 0.3 || currentTimeSec > 3.5) return null;
+  if (currentTimeSec < 0.2 || currentTimeSec > 3.5) return null;
 
-  const enterFrame = Math.max(0, frame - Math.floor(0.3 * fps));
-
-  // Pop-in spring
   const scale = spring({
-    frame: enterFrame,
+    frame: Math.max(0, frame - Math.floor(0.2 * fps)),
     fps,
     config: { mass: 1, damping: 14, stiffness: 200 },
   });
 
-  // Fade-out starting at 3.0s
-  const opacity = interpolate(
-    currentTimeSec,
-    [3.0, 3.5],
-    [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-  );
+  const opacity = interpolate(currentTimeSec, [3.0, 3.5], [1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
 
   return (
     <div
       style={{
         position: "absolute",
-        top: 40,
-        left: 40,
-        right: 40,
+        top: SAFE.top,
+        left: SAFE.left,
+        right: SAFE.right,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 8,
+        gap: 10,
         opacity,
         transform: `scale(${scale})`,
       }}
@@ -57,11 +53,12 @@ export const HookOverlay: React.FC<HookOverlayProps> = ({ line1, line2 }) => {
           style={{
             fontFamily: "'Montserrat', sans-serif",
             fontWeight: 800,
-            fontSize: 48,
+            fontSize: 58,
             color: "white",
-            textShadow: "3px 3px 0 black, -3px -3px 0 black, 3px -3px 0 black, -3px 3px 0 black",
+            textShadow:
+              "3px 3px 0 black, -3px -3px 0 black, 3px -3px 0 black, -3px 3px 0 black, 0 6px 16px rgba(0,0,0,0.6)",
             textAlign: "center",
-            lineHeight: 1.2,
+            lineHeight: 1.15,
           }}
         >
           {line1}
@@ -71,12 +68,12 @@ export const HookOverlay: React.FC<HookOverlayProps> = ({ line1, line2 }) => {
         <div
           style={{
             fontFamily: "'Inter', sans-serif",
-            fontWeight: 600,
-            fontSize: 28,
-            color: "#00BFFF",
-            textShadow: "2px 2px 0 black",
+            fontWeight: 700,
+            fontSize: 36,
+            color: "#35CFFF",
+            textShadow: "2px 2px 0 black, -2px -2px 0 black, 2px -2px 0 black, -2px 2px 0 black",
             textAlign: "center",
-            lineHeight: 1.3,
+            lineHeight: 1.25,
           }}
         >
           {line2}
