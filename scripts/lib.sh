@@ -18,19 +18,31 @@ shorts_venv() {
     fi
 }
 
-# "sudo pacman -S --needed ffmpeg jq"-style hint for the local package manager.
+# Install hint for the local package manager. Takes generic names
+# (ffmpeg jq python nodejs npm yt-dlp) and maps them where distros differ.
 shorts_install_hint() {
-    if command -v pacman &>/dev/null; then
-        echo "sudo pacman -S --needed $*"
-    elif command -v apt-get &>/dev/null; then
-        echo "sudo apt install $*"
-    elif command -v dnf &>/dev/null; then
-        echo "sudo dnf install $*"
-    elif command -v brew &>/dev/null; then
-        echo "brew install $*"
-    else
-        echo "install: $*"
+    local manager="" pkg out=""
+    if command -v pacman &>/dev/null; then manager="pacman"
+    elif command -v apt-get &>/dev/null; then manager="apt"
+    elif command -v dnf &>/dev/null; then manager="dnf"
+    elif command -v brew &>/dev/null; then manager="brew"
     fi
+    for pkg in "$@"; do
+        case "$manager:$pkg" in
+            brew:nodejs) pkg="node" ;;
+            brew:npm) continue ;;                      # ships with node
+            apt:python) pkg="python3 python3-venv" ;;
+            dnf:python) pkg="python3" ;;
+        esac
+        out="$out $pkg"
+    done
+    case "$manager" in
+        pacman) echo "sudo pacman -S --needed$out" ;;
+        apt) echo "sudo apt install$out" ;;
+        dnf) echo "sudo dnf install$out" ;;
+        brew) echo "brew install$out" ;;
+        *) echo "install:$out (macOS: get Homebrew from https://brew.sh)" ;;
+    esac
 }
 
 # Is the H.264 NVENC encoder actually usable (not merely compiled in)?
@@ -44,4 +56,29 @@ shorts_nvenc_works() {
 # File size in bytes (GNU and BSD stat).
 shorts_file_size() {
     stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || echo 0
+}
+
+# File modification time, seconds since epoch (GNU and BSD stat).
+shorts_file_mtime() {
+    stat -c%Y "$1" 2>/dev/null || stat -f%m "$1" 2>/dev/null || echo 0
+}
+
+# Absolute path of an existing file (macOS before 13 has no realpath).
+shorts_abspath() {
+    if command -v realpath &>/dev/null; then
+        realpath "$1"
+    else
+        (cd "$(dirname "$1")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")")
+    fi
+}
+
+# Short stable hash of a string (sha1sum on Linux, shasum on macOS).
+shorts_hash8() {
+    if command -v sha1sum &>/dev/null; then
+        printf '%s' "$1" | sha1sum | cut -c1-8
+    elif command -v shasum &>/dev/null; then
+        printf '%s' "$1" | shasum | cut -c1-8
+    else
+        printf '%s' "$1" | cksum | cut -d' ' -f1
+    fi
 }

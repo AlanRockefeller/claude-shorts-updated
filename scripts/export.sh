@@ -63,7 +63,7 @@ loudnorm_filter() {
     local input="$1" stats
     stats="$(ffmpeg -nostdin -hide_banner -nostats -i "$input" -vn \
         -af "loudnorm=${LOUDNORM_TARGET}:print_format=json" -f null - 2>&1 \
-        | awk '/^\{/{capture=1} capture{print} /^\}/{capture=0}' \
+        | awk '/^[{]/{capture=1} capture{print} /^[}]/{capture=0}' \
         | jq -c 'select(.input_i != null)' 2>/dev/null | tail -1)"
 
     local filter=""
@@ -102,7 +102,7 @@ encode() {
 
     if [ "$HAS_NVENC" = "true" ]; then
         if ffmpeg -nostdin -y -hide_banner -nostats -loglevel error -i "$input" \
-            -c:v h264_nvenc -preset p5 -tune hq "${extra_gpu[@]}" "${rate[@]}" \
+            -c:v h264_nvenc -preset p5 -tune hq ${extra_gpu[@]+"${extra_gpu[@]}"} "${rate[@]}" \
             "${common[@]}" "$tmp" 2>>"$LOG_FILE"; then
             mv -f "$tmp" "$output"; ENCODER_USED="h264_nvenc"; return 0
         fi
@@ -110,7 +110,7 @@ encode() {
     fi
 
     if ffmpeg -nostdin -y -hide_banner -nostats -loglevel error -i "$input" \
-        -c:v libx264 -preset slow "${extra_cpu[@]}" "${rate[@]}" \
+        -c:v libx264 -preset slow ${extra_cpu[@]+"${extra_cpu[@]}"} "${rate[@]}" \
         "${common[@]}" "$tmp" 2>>"$LOG_FILE"; then
         mv -f "$tmp" "$output"; ENCODER_USED="libx264"; return 0
     fi

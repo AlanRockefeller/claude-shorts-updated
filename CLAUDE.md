@@ -33,9 +33,11 @@ transcript.json / transcript.txt   transcribe.py     (txt is the reading view fo
 approved_segments.json             written by Claude
 snapped_segments.json              snap_boundaries.py (adds word_start / word_end)
 clips/clip_NN.mp4                  extract_clips.sh
-reframe.json                       compute_reframe.py (layout: fill | framed | split)
 caption_edits.json                 written by Claude  (delete / replace / emphasis by word index)
-captions.json                      captions.py apply  (clip-local ms, keyed by segment id)
+clips/uncut/, segments[].keep      jumpcut.py         (optional: recuts clips, records kept ranges
+                                                       and render_duration in snapped_segments.json)
+captions.json                      captions.py apply  (clip-local ms, re-timed through `keep`)
+reframe.json                       compute_reframe.py (layout: fill | framed | split; run on the cut clips)
 render/short_NN.mp4                remotion/render.mjs
 qa/*.jpg                           contact_sheet.py
 ```
@@ -45,6 +47,7 @@ Conventions:
 - `transcript.json` is large; nothing should require Claude to read or rewrite it. Add a compact view or an edit-list instead.
 - Layout constants and platform safe zones are in `remotion/src/styles/layout.ts`.
 - All `remotion` / `@remotion/*` packages must be the same exact version (no `^`).
+- Shell scripts must run on macOS's bash 3.2 with BSD userland as well as Linux: no `sha1sum`/`realpath`/`stat -c` without the fallbacks in `scripts/lib.sh`, no GNU-only flags, and expand possibly-empty arrays as `${arr[@]+"${arr[@]}"}` (bash 3.2 errors on `"${arr[@]}"` under `set -u`). CI runs the smoke test on macOS.
 
 ## Python Virtual Environment
 

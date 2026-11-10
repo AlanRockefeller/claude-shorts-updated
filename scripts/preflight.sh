@@ -4,6 +4,10 @@
 #
 # Usage: bash scripts/preflight.sh <input_file> [output_dir]
 # Output: JSON with pass/fail, video info, work_dir, output_dir, warnings
+#
+# Portability: these scripts must run on macOS's bash 3.2 with BSD tools as
+# well as Linux. Empty arrays are expanded as ${arr[@]+"${arr[@]}"} because
+# bash 3.2 treats "${arr[@]}" of an empty array as unset under `set -u`.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,7 +40,7 @@ for tool in ffmpeg ffprobe; do
 done
 
 if ! command -v node &>/dev/null; then
-    ERRORS+=("Node.js not found — $(shorts_install_hint nodejs npm) (or: mise use -g node@lts)")
+    ERRORS+=("Node.js not found — $(shorts_install_hint nodejs npm)")
 else
     NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
     if [ "$NODE_MAJOR" -lt 20 ]; then
@@ -48,12 +52,7 @@ VENV="$(shorts_venv)"
 if [ -z "$VENV" ]; then
     ERRORS+=("Python venv not found — run: bash $ROOT_DIR/setup.sh")
 else
-    MISSING_PY="$("$VENV/bin/python3" - <<'PY' 2>/dev/null
-import importlib.util
-missing = [m for m in ("faster_whisper", "cv2", "numpy") if importlib.util.find_spec(m) is None]
-print(" ".join(missing))
-PY
-)"
+    MISSING_PY="$("$VENV/bin/python3" -c 'import importlib.util as u; print(" ".join(m for m in ("faster_whisper", "cv2", "numpy") if u.find_spec(m) is None))' 2>/dev/null)"
     if [ -n "$MISSING_PY" ]; then
         ERRORS+=("Missing Python packages in $VENV: $MISSING_PY — run: bash $ROOT_DIR/setup.sh")
     fi
@@ -93,10 +92,10 @@ WORK_DIR=""
 OUTPUT_DIR="$OUTPUT_BASE"
 CACHED_TRANSCRIPT=false
 if [ -f "$INPUT" ]; then
-    ABS_INPUT="$(realpath "$INPUT")"
+    ABS_INPUT="$(shorts_abspath "$INPUT")"
     SIZE="$(shorts_file_size "$ABS_INPUT")"
-    MTIME="$(stat -c%Y "$ABS_INPUT" 2>/dev/null || stat -f%m "$ABS_INPUT" 2>/dev/null || echo 0)"
-    HASH="$(printf '%s|%s|%s' "$ABS_INPUT" "$SIZE" "$MTIME" | sha1sum | cut -c1-8)"
+    MTIME="$(shorts_file_mtime "$ABS_INPUT")"
+    HASH="$(shorts_hash8 "$ABS_INPUT|$SIZE|$MTIME")"
     SLUG="$(basename "${ABS_INPUT%.*}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40)"
     [ -n "$SLUG" ] || SLUG="video"
 
@@ -117,7 +116,7 @@ if [ -f "$INPUT" ]; then
     fi
 
     if [ -d "$OUTPUT_DIR" ]; then
-        EXISTING="$(find "$OUTPUT_DIR" -maxdepth 1 -name 'short_*.mp4' 2>/dev/null | wc -l)"
+        EXISTING="$(find "$OUTPUT_DIR" -maxdepth 1 -name 'short_*.mp4' 2>/dev/null | wc -l | tr -d ' ')"
         if [ "$EXISTING" -gt 0 ]; then
             WARNINGS+=("Output directory $OUTPUT_DIR already has $EXISTING short_*.mp4 files (same-named exports are replaced when re-rendered)")
         fi
@@ -141,8 +140,8 @@ jq -n \
     --argjson cached "$CACHED_TRANSCRIPT" \
     --argjson has_ytdlp "$(command -v yt-dlp &>/dev/null && echo true || echo false)" \
     --argjson probe "$PROBE" \
-    --argjson errors "$(to_json_array "${ERRORS[@]}")" \
-    --argjson warnings "$(to_json_array "${WARNINGS[@]}")" \
+    --argjson errors "$(to_json_array ${ERRORS[@]+"${ERRORS[@]}"})" \
+    --argjson warnings "$(to_json_array ${WARNINGS[@]+"${WARNINGS[@]}"})" \
     '($probe.streams // []) as $s
      | ([$s[] | select(.codec_type=="video")][0] // {}) as $v
      | ([$s[] | select(.codec_type=="audio")][0] // {}) as $a

@@ -27,6 +27,8 @@ Modernisation pass. Work files and command lines changed; re-run `bash install.s
 - Node.js 20+ (18 is end-of-life). Package-manager hints are distro-aware (pacman/apt/dnf/brew).
 
 ### Added
+- **Jump cuts** (`jumpcut.py`): optionally remove long pauses and filler words from the clips themselves. Pauses come from the real audio (threshold relative to the clip's loudness), fillers from the transcript ("um/uh" plus the words Claude deletes during caption review). Audio is cut sample-accurately with short fades, video on frame boundaries without accumulating drift, and captions are re-timed. Re-runnable and reversible (`--restore`).
+- **macOS support**: shell scripts work with bash 3.2 and BSD tools, setup finds a Homebrew Python when the system one is too old, and CI runs the pipeline on a macOS runner.
 - Visual QA: contact sheets of the source, the computed crops, and the rendered shorts for Claude to inspect (`contact_sheet.py`).
 - Face tracking that pans to follow a moving speaker; split-screen podcast layout; blurred backdrop for screen recordings.
 - Caption review by Claude: fix mis-heard words, delete fillers, mark emphasis words (rendered in an accent colour).

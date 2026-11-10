@@ -17,7 +17,7 @@ Claude Code guides you through an interactive pipeline:
 5. **Present** - Candidates in a table with scores, hooks, and rationale
 6. **Approve** - You pick segments, adjust timecodes, choose caption style and platform
 7. **Snap Boundaries** - Cut points move to sentence boundaries and real silences
-8. **Prepare** - Clips are cut (stream copy), reframed, and Claude reviews the crops and the caption text
+8. **Prepare** - Clips are cut, Claude reviews the caption text, long pauses and fillers are jump-cut out (optional), and the result is reframed
 9. **Render** - Remotion renders 1080x1920 video with animated captions; Claude checks frames of the result
 10. **Export** - Platform-optimized encoding, validation, and upload copy (title, description, hashtags)
 
@@ -28,9 +28,10 @@ Claude Code guides you through an interactive pipeline:
 - **Smart reframing** - Face tracking that follows a moving speaker, stacked split-screen for two-person podcasts, and cursor-following zoom with a blurred backdrop for screen recordings.
 - **Caption review** - Claude fixes mis-heard names and jargon, drops fillers, and marks key words for emphasis, without ever shifting caption timing.
 - **3 caption styles** - Bold (ALL CAPS, yellow highlights), Bounce (bouncy spring, rotating colors), Clean (minimal fade-in). Text stays inside the platforms' UI-safe zones.
+- **Jump cuts** - Optionally removes long pauses, "um"s and the fillers Claude flags, from the video itself. Pauses are measured in the real audio, cuts are click-free, and captions are re-timed to match.
 - **Audio-aware boundary snapping** - Never cuts mid-word or mid-sentence.
 - **Proper loudness** - Two-pass normalisation to -14 LUFS.
-- **GPU acceleration, CPU fallback** - CUDA for transcription and NVENC for export when available; everything also runs on CPU.
+- **Linux and macOS** - CUDA for transcription and NVENC for export when an NVIDIA GPU is present; everything also runs on CPU, including on Macs.
 
 ## Prerequisites
 
@@ -49,6 +50,14 @@ sudo pacman -S --needed ffmpeg jq python nodejs npm yt-dlp
 ```
 
 Debian / Ubuntu: `sudo apt install ffmpeg jq python3 python3-venv nodejs npm`
+
+macOS (with [Homebrew](https://brew.sh)):
+
+```bash
+brew install ffmpeg jq node python yt-dlp
+```
+
+On macOS everything runs on the CPU: there is no CUDA, and transcription uses CTranslate2's Apple Accelerate backend. That is comfortable on Apple Silicon; on older Intel Macs use `--model small` for long videos. The scripts are written for the bash 3.2 and BSD tools that ship with macOS, and CI runs the pipeline on a macOS runner.
 
 ## Installation
 
@@ -128,6 +137,7 @@ claude-shorts/
 │   ├── contact_sheet.py        # Frame grids for Claude's visual checks
 │   ├── snap_boundaries.py      # Sentence- and silence-aware cut points
 │   ├── extract_clips.sh        # Stream-copy clip extraction
+│   ├── jumpcut.py              # Cut long pauses and fillers out of the clips
 │   ├── compute_reframe.py      # Face tracking, split-screen, cursor tracking
 │   ├── captions.py             # Per-segment caption tracks + Claude's edits
 │   ├── export.sh               # Platform encodes, two-pass loudnorm

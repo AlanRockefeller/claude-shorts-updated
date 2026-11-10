@@ -19,23 +19,33 @@ echo ""
 MISSING=()
 command -v ffmpeg &>/dev/null || MISSING+=("ffmpeg")
 command -v jq &>/dev/null || MISSING+=("jq")
-command -v python3 &>/dev/null || MISSING+=("python")
 command -v node &>/dev/null || MISSING+=("nodejs")
 command -v npm &>/dev/null || MISSING+=("npm")
 
-if [ ${#MISSING[@]} -gt 0 ]; then
-    echo "[System] Missing: ${MISSING[*]}"
-    echo "[System] Install with: $(shorts_install_hint "${MISSING[@]}")"
-    echo "         (Node can also come from a version manager, e.g. 'mise use -g node@lts')"
-    exit 1
-fi
-echo "[System] ffmpeg, jq, python3, node present"
+HAVE_UV=false
+command -v uv &>/dev/null && HAVE_UV=true
 
-PY_OK="$(python3 -c 'import sys; print(int(sys.version_info >= (3, 10)))')"
-if [ "$PY_OK" != "1" ]; then
-    echo "[Python] Python 3.10+ is required (found $(python3 --version))"
+# Pick a Python >= 3.10. The `python3` that ships with macOS (3.9) is too old,
+# so also look for versioned interpreters (Homebrew installs python3.12 etc.).
+PYTHON_BIN=""
+for candidate in python3 python3.13 python3.12 python3.11 python3.10; do
+    if command -v "$candidate" &>/dev/null \
+        && "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
+        PYTHON_BIN="$(command -v "$candidate")"
+        break
+    fi
+done
+# uv can download a suitable Python by itself, so it is enough on its own.
+if [ -z "$PYTHON_BIN" ] && [ "$HAVE_UV" = false ]; then
+    MISSING+=("python")
+fi
+
+if [ ${#MISSING[@]} -gt 0 ]; then
+    echo "[System] Missing: ${MISSING[*]} (Python must be 3.10 or newer)"
+    echo "[System] Install with: $(shorts_install_hint "${MISSING[@]}")"
     exit 1
 fi
+echo "[System] ffmpeg, jq, node present; Python: ${PYTHON_BIN:-provided by uv}"
 
 # --- Python virtual environment --------------------------------------------------
 
@@ -48,15 +58,14 @@ else
     VENV="$HOME/.shorts-skill"
 fi
 
-HAVE_UV=false
-command -v uv &>/dev/null && HAVE_UV=true
-
 if [ ! -x "$VENV/bin/python3" ]; then
     echo "[Python] Creating venv at $VENV..."
-    if [ "$HAVE_UV" = true ]; then
-        uv venv --quiet "$VENV"
+    if [ "$HAVE_UV" = true ] && [ -n "$PYTHON_BIN" ]; then
+        uv venv --quiet --python "$PYTHON_BIN" "$VENV"
+    elif [ "$HAVE_UV" = true ]; then
+        uv venv --quiet --python 3.12 "$VENV"
     else
-        python3 -m venv "$VENV"
+        "$PYTHON_BIN" -m venv "$VENV"
     fi
 fi
 
@@ -88,6 +97,8 @@ if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
         pip_install $CUDA_PIP \
             || echo "[Python] WARNING: could not install CUDA wheels; transcription will use the CPU"
     fi
+elif [ "$(uname -s)" = "Darwin" ]; then
+    echo "[Python] macOS — transcription runs on the CPU (Apple Accelerate); no CUDA needed"
 else
     echo "[Python] No NVIDIA GPU detected — transcription will run on the CPU"
 fi

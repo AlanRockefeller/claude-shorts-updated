@@ -39,8 +39,10 @@ fi
 [[ "$CUDA_DEVICES" =~ ^[0-9]+$ ]] || CUDA_DEVICES=0
 
 jq -n --arg name "$GPU_NAME" --arg driver "$DRIVER" --argjson vram "$VRAM_MB" \
-    --arg encoders "$ENCODERS" --argjson nvenc "$NVENC_WORKS" --argjson cuda "$CUDA_DEVICES" '
+    --arg encoders "$ENCODERS" --argjson nvenc "$NVENC_WORKS" --argjson cuda "$CUDA_DEVICES" \
+    --arg os "$(uname -s)" '
     {
+      platform: $os,
       gpu_detected: ($name != ""),
       gpu_name: (if $name != "" then $name else null end),
       driver_version: (if $driver != "" then $driver else null end),
@@ -49,7 +51,8 @@ jq -n --arg name "$GPU_NAME" --arg driver "$DRIVER" --argjson vram "$VRAM_MB" \
       nvenc_available: $nvenc,
       nvenc_encoders: ($encoders | split(" ") | map(select(. != ""))),
       recommendation: (
-        if $name == "" then "No NVIDIA GPU: transcription and encoding run on the CPU (use --model small for long videos)"
+        if $os == "Darwin" then "macOS: transcription and encoding run on the CPU, which is fine on Apple Silicon (use --model small on older Intel Macs)"
+        elif $name == "" then "No NVIDIA GPU: transcription and encoding run on the CPU (use --model small for long videos)"
         elif $cuda == 0 then "GPU found but not usable for transcription from the skill venv: re-run setup.sh"
         elif $vram > 0 and $vram < 5000 then "Low VRAM: use --model small or --compute-type int8_float16"
         else "GPU transcription available" end)
