@@ -70,7 +70,10 @@ PROBE='{}'
 if [ ! -f "$INPUT" ]; then
     ERRORS+=("Input file not found: $INPUT")
 elif [ "$HAVE_FFMPEG" = true ]; then
-    PROBE="$(ffprobe -v error -print_format json -show_format -show_streams "$INPUT" 2>/dev/null || echo '{}')"
+    # ffprobe prints an empty JSON object before failing on a non-media file,
+    # so do not append a fallback to its output: replace it.
+    PROBE="$(ffprobe -v error -print_format json -show_format -show_streams "$INPUT" 2>/dev/null)" || PROBE='{}'
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$PROBE" || PROBE='{}'
     if [ "$(jq '[.streams[]? | select(.codec_type=="video" and (.disposition.attached_pic // 0) == 0)] | length' <<<"$PROBE")" -eq 0 ]; then
         ERRORS+=("Input has no video stream: $INPUT")
     fi

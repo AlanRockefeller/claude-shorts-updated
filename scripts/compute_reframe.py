@@ -349,6 +349,10 @@ def main():
                              "can be detected reliably, otherwise splits")
     parser.add_argument("--no-split", action="store_true",
                         help="Same as --podcast-layout single")
+    parser.add_argument("--only", default=None,
+                        help="Comma-separated segment ids (e.g. 2,5). Only these clips are "
+                             "recomputed and merged into the existing output file, so clips "
+                             "can use different content types")
     args = parser.parse_args()
 
     if not os.path.isdir(args.clips_dir):
@@ -356,6 +360,16 @@ def main():
     clips = sorted(glob.glob(os.path.join(args.clips_dir, "clip_*.mp4")))
     if not clips:
         fail(f"No clip_*.mp4 files found in {args.clips_dir}")
+
+    previous = {}
+    if args.only:
+        wanted = {f"clip_{int(i):02d}.mp4" for i in args.only.split(",") if i.strip()}
+        clips = [c for c in clips if os.path.basename(c) in wanted]
+        if not clips:
+            fail(f"--only {args.only} matches no clips in {args.clips_dir}")
+        if os.path.isfile(args.output):
+            with open(args.output, encoding="utf-8") as f:
+                previous = json.load(f).get("clips", {})
 
     start = time.time()
     results = {}
@@ -379,6 +393,7 @@ def main():
                                   "single" if args.no_split else args.podcast_layout)
 
         entry.update({
+            "content_type": args.content_type,
             "source_resolution": f"{src_w}x{src_h}",
             "fps": round(info["fps"], 3),
             "duration": round(info["duration"], 2),
@@ -387,11 +402,12 @@ def main():
         results[os.path.basename(clip_path)] = entry
 
     elapsed = round(time.time() - start, 2)
+    merged = {**previous, **results}
     write_json(args.output, {
         "content_type": args.content_type,
-        "clip_count": len(results),
+        "clip_count": len(merged),
         "computation_time_sec": elapsed,
-        "clips": results,
+        "clips": merged,
     }, indent=2)
 
     summary = {"action": "compute_reframe", "content_type": args.content_type,

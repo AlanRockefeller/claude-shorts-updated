@@ -253,6 +253,9 @@ def main():
     txt_path = os.path.splitext(out_path)[0] + ".txt"
     source = fingerprint(args.input)
 
+    # Settings that change the transcript; a cached result must match them.
+    options = {"language": args.language, "initial_prompt": args.initial_prompt}
+
     # Cache hit?
     if not args.force and os.path.isfile(out_path):
         try:
@@ -260,7 +263,8 @@ def main():
         except (OSError, json.JSONDecodeError):
             cached = None
         if (cached and cached.get("version") == 2 and cached.get("source") == source
-                and cached.get("model") == args.model and cached.get("words")):
+                and cached.get("model") == args.model and cached.get("words")
+                and cached.get("options", {}) == options):
             if not os.path.isfile(txt_path):
                 with open(txt_path, "w", encoding="utf-8") as f:
                     f.write(render_reading_view(cached, cached["sentences"]))
@@ -311,6 +315,7 @@ def main():
         whisper_info.language, round(float(whisper_info.language_probability), 3),
         args.model, device, compute_type, elapsed)
 
+    output["options"] = options
     write_json(out_path, output)
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(render_reading_view(output, output["sentences"]))

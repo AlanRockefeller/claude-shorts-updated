@@ -40,13 +40,9 @@ in each command (shown below as `ROOT`, `WORK`, `OUT`, `INPUT`). Quote paths tha
 contain spaces. Everything runs on Linux and macOS; always invoke the shell scripts
 with `bash` as shown.
 
-Python scripts need the skill's venv. Prefix Python commands with:
-
-```bash
-source "$( [ -d ~/.video-skill ] && echo ~/.video-skill || echo ~/.shorts-skill )/bin/activate" && python3 ...
-```
-
-(Preflight prints the venv it found as `venv`; you can use `VENV/bin/python3` directly instead.)
+Preflight prints the Python environment it validated as `venv`. Run every `python3`
+command below as `VENV/bin/python3` with that path written out; the system Python
+does not have the packages.
 
 ## Pipeline
 
@@ -125,7 +121,8 @@ is only a first guess:
   zoomed, cursor-following inset over a blurred backdrop
 
 Tell the user what you chose and why. If the video mixes types (e.g. slides with
-cutaways to the speaker), say so; you can set the type per segment in Step 8.
+cutaways to the speaker), say so; Step 8e shows how to give individual clips a
+different type.
 
 ### Step 4: ANALYZE
 
@@ -369,6 +366,11 @@ python3 ROOT/scripts/broll.py apply --plan WORK/broll_plan.json --dir "BROLL_DIR
 
 It reports the exact timings, coverage per short and any problems (missing file,
 overlap). Pass `--broll WORK/broll.json` to the renderer in Step 9.
+
+**Mixed content.** `--content-type` applies to every clip in the run. If some clips
+need a different type, run it for the main type first, then again with
+`--content-type OTHER --only 3,5`, which recomputes just those clips and merges them
+into `reframe.json`.
 
 If you re-run `extract_clips.sh` or change the jump cuts later, repeat 8c–8f.
 

@@ -9,7 +9,8 @@
 #   bash install.sh --no-setup   Copy/link only; skip dependency setup
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path: the script may be reached through an existing install symlink.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
 SKILL_DIR="$SKILLS_DIR/shorts"
 
@@ -27,7 +28,11 @@ done
 echo "=== Installing shorts skill ==="
 mkdir -p "$SKILLS_DIR"
 
-if [ "$MODE" = "link" ]; then
+if [ ! -L "$SKILL_DIR" ] && [ -d "$SKILL_DIR" ] && [ "$SCRIPT_DIR" -ef "$SKILL_DIR" ]; then
+    # The checkout itself lives at the install location: replacing the
+    # destination would delete the source.
+    echo "This checkout is already at $SKILL_DIR; nothing to copy or link"
+elif [ "$MODE" = "link" ]; then
     if [ -e "$SKILL_DIR" ] && [ ! -L "$SKILL_DIR" ]; then
         echo "Replacing existing copy at $SKILL_DIR with a symlink"
         rm -rf "$SKILL_DIR"

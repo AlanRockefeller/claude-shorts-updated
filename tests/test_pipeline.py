@@ -95,9 +95,15 @@ def test_transcript_is_cached(tmp_path, monkeypatch, capsys):
         transcribe.main()
     assert len(calls) == 1, "second run should come from the cache"
 
+    # Changing a setting that affects the transcript must not reuse the cache.
+    monkeypatch.setattr(sys, "argv", ["transcribe.py", str(video), "--output", str(out),
+                                      "--initial-prompt", "Names: OmniRoute"])
+    transcribe.main()
+    assert len(calls) == 2
+
     summaries = [json.loads(chunk) for chunk in capsys.readouterr().out.strip().split("\n}\n")
                  if chunk.strip() for chunk in [chunk if chunk.endswith("}") else chunk + "\n}"]]
-    assert [s["cached"] for s in summaries] == [False, True]
+    assert [s["cached"] for s in summaries] == [False, True, False]
     data = json.loads(out.read_text())
     assert data["version"] == 2 and data["word_count"] == len(data["words"])
     assert (tmp_path / "work" / "transcript.txt").exists()

@@ -33,8 +33,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STYLES = ["bold", "bounce", "clean"];
 
 const log = (obj) => console.log(JSON.stringify(obj));
+// Errors go to stdout as JSON too, like every other script in the pipeline.
 const die = (message, extra = {}) => {
-  console.error(JSON.stringify({ error: message, ...extra }));
+  console.log(JSON.stringify({ error: message, ...extra }));
   process.exit(1);
 };
 
@@ -201,10 +202,26 @@ async function main() {
   if (!STYLES.includes(style)) die(`Unknown caption style: ${style}`, { valid: STYLES });
   if (!["blur", "black"].includes(args.background)) die(`Unknown background: ${args.background}`);
 
+  // Reject bad numbers now, before the slow bundle and before a browser is open.
+  if (args.fps !== "auto") pickFps(args.fps, 30);
+  const crf = Number(args.crf);
+  if (!Number.isFinite(crf) || crf < 0 || crf > 51) die(`Invalid --crf: ${args.crf}`);
+  const punchZoom = Number(args["punch-zoom"]);
+  if (!Number.isFinite(punchZoom) || punchZoom < 1 || punchZoom > 2) {
+    die(`Invalid --punch-zoom: ${args["punch-zoom"]} (expected 1.0-2.0)`);
+  }
+  let concurrency = null;
+  if (args.concurrency !== undefined) {
+    concurrency = Number(args.concurrency);
+    if (!Number.isInteger(concurrency) || concurrency < 1) die(`Invalid --concurrency: ${args.concurrency}`);
+  }
+
+  // Give every segment its id (position in the full list if it has none)
+  // before filtering, so --only and the clip/output names always agree.
   const only = args.only ? new Set(args.only.split(",").map((s) => s.trim())) : null;
-  const segments = (segmentsData.segments || []).filter(
-    (seg, i) => !only || only.has(String(seg.id ?? i + 1))
-  );
+  const segments = (segmentsData.segments || [])
+    .map((seg, i) => ({ ...seg, id: seg.id ?? i + 1 }))
+    .filter((seg) => !only || only.has(String(seg.id)));
   if (segments.length === 0) die("No segments to render");
 
   fs.mkdirSync(outputDir, { recursive: true });
@@ -273,7 +290,7 @@ async function main() {
         cropMode: reframe.crop_mode || "pan",
         // Punch-ins suit people on camera; on screen recordings they just look like a glitch.
         punchIns: args["no-punch-in"] || (reframe.layout || "fill") === "framed" ? [] : punchInTimes(seg),
-        punchZoom: Number(args["punch-zoom"]),
+        punchZoom,
         broll: (brollBySegment[String(segId)] || []).map(({ name, ...rest }) => ({
           src: `${baseUrl}/${name}`,
           ...rest,
@@ -322,7 +339,7 @@ async function main() {
             composition,
             serveUrl,
             codec: "h264",
-            crf: Number(args.crf),
+            crf,
             // High-quality mezzanine: export.sh re-encodes this per platform.
             jpegQuality: 92,
             colorSpace: "bt709",
@@ -330,7 +347,7 @@ async function main() {
             outputLocation: outputPath,
             inputProps,
             puppeteerInstance: browser,
-            concurrency: args.concurrency ? Number(args.concurrency) : null,
+            concurrency,
             onProgress: ({ progress }) => {
               const pct = Math.floor(progress * 100);
               if (pct >= lastReported + 25 && pct < 100) {
@@ -386,6 +403,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(JSON.stringify({ error: err.message, stack: err.stack }));
+  console.log(JSON.stringify({ error: err.message, stack: err.stack }));
   process.exit(1);
 });

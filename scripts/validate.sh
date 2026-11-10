@@ -44,7 +44,8 @@ for file in "$OUTPUT_DIR"/short_*.mp4; do
     ISSUES=()
     name="$(basename "$file")"
 
-    probe="$(ffprobe -v error -print_format json -show_format -show_streams "$file" 2>/dev/null || echo '{}')"
+    probe="$(ffprobe -v error -print_format json -show_format -show_streams "$file" 2>/dev/null)" || probe='{}'
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$probe" || probe='{}'
     read -r width height vcodec acodec duration < <(jq -r '
         ([.streams[]? | select(.codec_type=="video")][0] // {}) as $v
         | ([.streams[]? | select(.codec_type=="audio")][0] // {}) as $a

@@ -62,7 +62,9 @@ jq -e '.segments[0] | (.start > 4.0 and .start <= 4.2) and (.end >= 13.7 and .en
 step "extract clips"
 bash "$ROOT/scripts/extract_clips.sh" --input "$INPUT" --segments "$WORK/snapped_segments.json" \
     --clips-dir "$WORK/clips" >/dev/null
-[ -f "$WORK/clips/clip_01.mp4" ] && [ -f "$WORK/clips/clip_02.mp4" ]
+# One test per line: `set -e` ignores a failing first command of an && list.
+[ -f "$WORK/clips/clip_01.mp4" ]
+[ -f "$WORK/clips/clip_02.mp4" ]
 
 step "caption review"
 "$PYTHON" "$ROOT/scripts/captions.py" dump --segments "$WORK/snapped_segments.json" \
@@ -104,6 +106,11 @@ step "reframe"
 "$PYTHON" "$ROOT/scripts/contact_sheet.py" reframe --clips-dir "$WORK/clips" \
     --reframe "$WORK/reframe.json" --output-dir "$WORK/qa" >/dev/null
 jq -e '.clips["clip_01.mp4"].layout == "framed"' "$WORK/reframe.json" >/dev/null
+# Re-doing one clip with another content type leaves the other clip's entry alone.
+"$PYTHON" "$ROOT/scripts/compute_reframe.py" --clips-dir "$WORK/clips" --content-type talking-head \
+    --only 2 --output "$WORK/reframe.json" >/dev/null
+jq -e '.clips["clip_01.mp4"].layout == "framed" and .clips["clip_02.mp4"].layout == "fill"' \
+    "$WORK/reframe.json" >/dev/null
 
 step "b-roll plan"
 mkdir -p "$TMP/broll"

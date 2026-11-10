@@ -17,8 +17,8 @@ bash install.sh          # Copy skill to ~/.claude/skills/shorts/ and install it
 bash install.sh --link   # Symlink this checkout instead (development)
 bash setup.sh            # Dependencies only, for this checkout
 
-pytest tests/                  # Unit tests
-bash tests/smoke.sh --render   # Synthetic end-to-end run (no Whisper model needed)
+pytest tests/                                  # Unit tests (needs requirements.txt + pytest)
+PYTHON=python3 bash tests/smoke.sh --render    # Synthetic end-to-end run (no Whisper model needed)
 (cd remotion && npm run typecheck)
 ```
 
@@ -56,9 +56,7 @@ Conventions:
 
 Scripts use `~/.video-skill/` if it exists (shared with claude-video), otherwise `~/.shorts-skill/`. Override with `SHORTS_VENV`.
 
-```bash
-source ~/.shorts-skill/bin/activate
-```
+`preflight.sh` prints the environment it found as `venv`; use that interpreter (`<venv>/bin/python3`) rather than assuming a path. For tests, any environment with `requirements.txt` and `pytest` installed works: pass it to the smoke test as `PYTHON=...`.
 
 ## Remotion
 

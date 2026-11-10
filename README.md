@@ -194,10 +194,10 @@ All three accept clips up to 3 minutes; the default candidate length is 20-60 se
 ## Testing
 
 ```bash
-source ~/.shorts-skill/bin/activate && pip install pytest
-pytest tests/                 # unit tests (no GPU, model or FFmpeg needed)
-bash tests/smoke.sh           # synthetic end-to-end run, everything but the render
-bash tests/smoke.sh --render  # ...including Remotion render, export and validation
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+.venv/bin/pytest tests/                               # unit tests (no GPU, model or FFmpeg needed)
+PYTHON=.venv/bin/python bash tests/smoke.sh           # synthetic end-to-end run, everything but the render
+PYTHON=.venv/bin/python bash tests/smoke.sh --render  # ...including Remotion render, music, export and validation
 ```
 
 The smoke test generates its own video and transcript, so it does not need a Whisper model.
