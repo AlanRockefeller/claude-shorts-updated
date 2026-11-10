@@ -96,6 +96,8 @@ In Claude Code:
 /shorts https://www.youtube.com/watch?v=...     (needs yt-dlp; only for content you may reuse)
 ```
 
+See the **[User Guide](docs/GUIDE.md)** for jump cuts, two-person layouts, b-roll, music, the style profile and tuning tips.
+
 ### Example Interaction
 
 ```
@@ -158,6 +160,7 @@ claude-shorts/
 ├── remotion/
 │   ├── render.mjs              # Bundle-once-render-many orchestrator
 │   └── src/                    # Composition, layouts, caption styles
+├── docs/GUIDE.md               # User guide for the optional features
 ├── references/                 # Scoring rubric, caption/platform specs, Remotion notes
 └── tests/                      # pytest unit tests + synthetic end-to-end smoke test
 ```
