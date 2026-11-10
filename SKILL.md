@@ -37,7 +37,8 @@ Input for this run: `$ARGUMENTS`
 
 Shell variables do not persist between Bash calls, so write these paths out literally
 in each command (shown below as `ROOT`, `WORK`, `OUT`, `INPUT`). Quote paths that
-contain spaces.
+contain spaces. Everything runs on Linux and macOS; always invoke the shell scripts
+with `bash` as shown.
 
 Python scripts need the skill's venv. Prefix Python commands with:
 
@@ -165,6 +166,10 @@ Then ask with AskUserQuestion:
 1. **Which segments?** — all, specific numbers, or "none, re-analyze"
 2. **Caption style?** — bold (ALL CAPS pop-in), bounce (bouncy colourful), clean (minimal)
 3. **Platform?** — youtube, tiktok, instagram, or all
+4. **Tighten pacing with jump cuts?** — "pauses and fillers" (recommended for
+   talking-head and podcast), "pauses only", or "no". Recommend "no" for screen
+   recordings and demos, where silent stretches often show something happening, and
+   for videos with background music, where every cut is audible in the music.
 
 ### Step 6: APPROVE
 
@@ -189,7 +194,8 @@ Write `WORK/approved_segments.json`:
   ],
   "style": "bold",
   "platform": "all",
-  "content_type": "talking-head"
+  "content_type": "talking-head",
+  "jump_cuts": "pauses and fillers"
 }
 ```
 
@@ -214,28 +220,18 @@ the adjustments and any warnings.
 
 Use `snapped_segments.json` from here on.
 
-### Step 8: CLIPS, REFRAME, CAPTIONS
+### Step 8: CLIPS, CAPTIONS, JUMP CUTS, REFRAME
 
-Extract clips and compute the reframe:
+Do these in order: later steps depend on earlier ones.
+
+**8a. Extract the clips**
 
 ```bash
 bash ROOT/scripts/extract_clips.sh --input "INPUT" \
     --segments WORK/snapped_segments.json --clips-dir WORK/clips
-python3 ROOT/scripts/compute_reframe.py --clips-dir WORK/clips \
-    --content-type CONTENT_TYPE --output WORK/reframe.json
-python3 ROOT/scripts/contact_sheet.py reframe --clips-dir WORK/clips \
-    --reframe WORK/reframe.json --output-dir WORK/qa
 ```
 
-Read each `WORK/qa/reframe_clip_NN.jpg`. The coloured boxes are the crops. Check that
-every speaker is inside their box, heads are not cut off, and for screen recordings
-that the important content is inside. If a crop is wrong:
-- wrong layout → re-run with a different `--content-type`, `--no-split` (podcast) or
-  `--no-cursor-track` / `--zoom 0.7` (screen)
-- only one clip is off → edit that clip's entry in `WORK/reframe.json` directly
-  (`crop.x`, or delete `crop_keyframes` for a static crop)
-
-Now review the captions. Dump the words of the approved segments:
+**8b. Review the caption words**
 
 ```bash
 python3 ROOT/scripts/captions.py dump --segments WORK/snapped_segments.json \
@@ -255,8 +251,11 @@ using the word indexes from the dump:
 }
 ```
 
-- `delete` — fillers and false starts that hurt readability ("you know", "like",
-  "I mean", a repeated word). Plain "um/uh" are removed automatically.
+- `delete` — fillers and false starts ("you know", "like", "I mean", a repeated
+  word, an abandoned sentence start). Plain "um/uh" are removed automatically.
+  With jump cuts on, deleted words are cut out of the audio and video too, so only
+  delete words whose removal leaves a sentence that still sounds complete when
+  spoken. Do not delete words just to tighten the wording.
 - `replace` — mis-heard words. Check `?`-flagged (low confidence) words, names,
   product names and numbers against context. Keep it one-for-one; do not rewrite
   what the speaker said.
@@ -264,14 +263,54 @@ using the word indexes from the dump:
   surprising noun, the verb of the payoff). These render in an accent colour. Use it
   sparingly: if everything is emphasised, nothing is.
 
-Timing is never changed, so captions stay in sync. Then build the caption track
-(omit `--edits` if there is nothing to change):
+**8c. Jump cuts** (skip if the user chose "no")
+
+```bash
+python3 ROOT/scripts/jumpcut.py --segments WORK/snapped_segments.json \
+    --transcript WORK/transcript.json --clips-dir WORK/clips \
+    --edits WORK/caption_edits.json
+```
+
+Shortens pauses longer than 0.5 s to 0.2 s and cuts out the deleted words and
+hesitation sounds, re-encoding each clip (the originals stay in `WORK/clips/uncut/`).
+Pauses are found in the real audio and words that stay are never cut into.
+
+- "pauses only" → add `--no-fillers`
+- a more relaxed feel → `--max-pause 0.8 --keep-pause 0.35`; punchier → `--max-pause 0.35 --keep-pause 0.12`
+- `--dry-run` shows what would be removed; `--restore` undoes the cuts
+- it can be re-run after changing `caption_edits.json` or the settings
+
+Report the time removed per clip. If a clip lost more than about a third of its
+length, mention it: the user may prefer a gentler setting.
+
+**8d. Build the caption track** (always after 8c, so captions follow the cuts)
 
 ```bash
 python3 ROOT/scripts/captions.py apply --segments WORK/snapped_segments.json \
     --transcript WORK/transcript.json --edits WORK/caption_edits.json \
     --output WORK/captions.json
 ```
+
+Omit `--edits` if there is nothing to change. Caption timing always follows the audio.
+
+**8e. Reframe** (after 8c: tracking is computed on the final, cut clips)
+
+```bash
+python3 ROOT/scripts/compute_reframe.py --clips-dir WORK/clips \
+    --content-type CONTENT_TYPE --output WORK/reframe.json
+python3 ROOT/scripts/contact_sheet.py reframe --clips-dir WORK/clips \
+    --reframe WORK/reframe.json --output-dir WORK/qa
+```
+
+Read each `WORK/qa/reframe_clip_NN.jpg`. The coloured boxes are the crops. Check that
+every speaker is inside their box, heads are not cut off, and for screen recordings
+that the important content is inside. If a crop is wrong:
+- wrong layout → re-run with a different `--content-type`, `--no-split` (podcast) or
+  `--no-cursor-track` / `--zoom 0.7` (screen)
+- only one clip is off → edit that clip's entry in `WORK/reframe.json` directly
+  (`crop.x`, or delete `crop_keyframes` for a static crop)
+
+If you re-run `extract_clips.sh` or change the jump cuts later, repeat 8c–8e.
 
 ### Step 9: RENDER
 
@@ -360,6 +399,7 @@ See `ROOT/references/caption-styles.md` for visual specs.
 | Clip length | 20–60 s | Choose longer candidates; `snap_boundaries.py --max-duration` |
 | Screen zoom | 0.55 of source width | `compute_reframe.py --zoom 0.7` |
 | Podcast layout | split-screen when speakers are far apart | `--no-split` |
+| Jump cuts | ask the user; pauses > 0.5 s cut to 0.2 s | `jumpcut.py --max-pause/--keep-pause/--no-fillers` |
 | Output frame rate | follows source (max 60) | `render.mjs --fps 30` |
 | Work directory | `~/.cache/claude-shorts/` | `SHORTS_TMP` env var |
 | Browser for rendering | Remotion's Chrome Headless Shell | `SHORTS_CHROME=/usr/bin/chromium` |
@@ -374,6 +414,8 @@ See `ROOT/references/caption-styles.md` for visual specs.
 - **Render cannot start a browser** — set `SHORTS_CHROME` to an installed
   Chrome/Chromium, or run `npx remotion browser ensure` in `ROOT/remotion`.
 - **Render fails after an update** — `(cd ROOT/remotion && npm ci)`.
+- **Jump cuts removed too much or sound choppy** — `jumpcut.py --restore`, then
+  re-run with `--no-fillers` or a larger `--max-pause`, and repeat 8d–8e.
 - **Export fails** — read the `.export.log` path it prints; try `--cpu`.
 - **Disk full** — WORK holds clips and renders; delete old run directories under
   the work directory or point `SHORTS_TMP` at a bigger disk.

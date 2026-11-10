@@ -152,3 +152,20 @@ def stream_frames(path, fps, max_width=960, gray=False):
     finally:
         proc.stdout.close()
         proc.wait()
+
+
+def retime(t, keep):
+    """Map a clip-local time to the timeline after jump cuts.
+
+    `keep` is the list of [start, end] ranges that survive. Returns
+    (new_time, inside) where `inside` is False if `t` fell in a removed range
+    (new_time is then the position of the cut).
+    """
+    offset = 0.0
+    for start, end in keep:
+        if t < start:
+            return offset, False
+        if t <= end:
+            return offset + (t - start), True
+        offset += end - start
+    return offset, False

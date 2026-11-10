@@ -246,3 +246,102 @@ def test_brief_false_positives_are_ignored():
 ])
 def test_content_classification(stats, expected):
     assert detect_content.classify(stats)[0] == expected
+
+
+# --- jump cuts ------------------------------------------------------------------------
+
+import jumpcut  # noqa: E402
+from shorts_common import retime  # noqa: E402
+
+
+def total(ranges):
+    return sum(end - start for start, end in ranges)
+
+
+def test_long_pause_is_shortened_and_short_pause_left_alone():
+    # speech 0-4, silence 4-7 (long), speech 7-9, silence 9-9.4 (short), speech 9.4-12
+    keep, stats = jumpcut.plan_cuts(
+        12.0, silences=[(4.0, 7.0), (9.0, 9.4)], dropped_words=[],
+        kept_words=[(0.2, 4.0), (7.0, 9.0), (9.4, 11.8)], max_pause=0.5, keep_pause=0.2)
+    assert keep == [[0.0, 4.1], [6.9, 12.0]]
+    assert stats["pauses_cut"] == 1 and stats["filler_words_cut"] == 0
+    assert abs(stats["removed_sec"] - 2.8) < 1e-6
+
+
+def test_filler_is_cut_with_its_surrounding_silence():
+    # "word [pause] um [pause] word": the filler and both pauses go, one short pause stays
+    keep, stats = jumpcut.plan_cuts(
+        10.0, silences=[(2.0, 2.6), (3.0, 3.7)], dropped_words=[(2.6, 3.0)],
+        kept_words=[(0.5, 2.0), (3.7, 9.5)], max_pause=0.5, keep_pause=0.2)
+    assert keep == [[0.0, 2.1], [3.6, 10.0]]
+    assert stats["filler_words_cut"] == 1
+
+
+def test_filler_in_continuous_speech_is_cut_at_word_boundaries():
+    keep, stats = jumpcut.plan_cuts(
+        6.0, silences=[], dropped_words=[(2.0, 2.3)],
+        kept_words=[(1.0, 2.0), (2.3, 3.0)], max_pause=0.5, keep_pause=0.2)
+    assert keep == [[0.0, 2.0], [2.3, 6.0]]
+
+
+def test_kept_words_are_never_cut_even_if_audio_reads_as_silent():
+    # A quiet speaker: the level meter calls 1-5 s "silence", but words are there.
+    keep, stats = jumpcut.plan_cuts(
+        6.0, silences=[(1.0, 5.0)], dropped_words=[],
+        kept_words=[(1.0, 1.6), (1.7, 2.4), (2.5, 3.2), (3.3, 4.0), (4.1, 5.0)],
+        max_pause=0.5, keep_pause=0.2)
+    assert keep == [[0.0, 6.0]] and stats["removed_sec"] == 0
+
+
+def test_leading_filler_and_trailing_silence():
+    keep, _ = jumpcut.plan_cuts(
+        10.0, silences=[(0.4, 0.9), (8.0, 10.0)], dropped_words=[(0.0, 0.4)],
+        kept_words=[(0.9, 8.0)], max_pause=0.5, keep_pause=0.2)
+    assert keep[0][0] == pytest.approx(0.9 - jumpcut.HEAD_ROOM)   # starts just before speech
+    assert keep[-1][1] == pytest.approx(8.0 + jumpcut.TAIL_ROOM)  # short tail, not 2 s of nothing
+
+
+def test_video_frames_track_audio_without_drift():
+    # Many awkward cut lengths: video must stay within one frame of the audio throughout.
+    fps = 30.0
+    keep, t = [], 0.0
+    for i in range(60):
+        length = 0.37 + 0.011 * (i % 7)
+        keep.append([t, t + length])
+        t += length + 0.5
+    frames = jumpcut.video_frame_ranges(keep, fps)
+    audio_total = video_total = 0.0
+    for (start, end), (first, last) in zip(keep, frames):
+        assert last > first
+        assert abs(first / fps - start) <= 0.5 / fps + 1e-9
+        audio_total += end - start
+        video_total += (last - first) / fps
+        assert abs(audio_total - video_total) <= 0.5 / fps + 1e-9
+
+
+def test_retime_maps_times_onto_the_cut_timeline():
+    keep = [[0.0, 2.0], [5.0, 8.0]]
+    assert retime(1.5, keep) == (1.5, True)
+    assert retime(6.0, keep) == (3.0, True)
+    assert retime(3.0, keep) == (2.0, False)   # inside the removed range
+    assert retime(9.0, keep) == (5.0, False)   # after the end
+
+
+def test_captions_follow_jump_cuts(tmp_path, capsys):
+    words = make_words(["Nobody tells you the hidden cost."], start=1.0, word=0.3, gap=0.1)
+    # Pretend a 2 s pause after "you" (word index 2) was cut down: shift later words.
+    for w in words[3:]:
+        w["start"] += 2.0
+        w["end"] += 2.0
+    seg = {"id": 1, "start": 0.5, "end": words[-1]["end"] + 0.3, "word_start": 0,
+           "word_end": len(words) - 1}
+    uncut = run_apply(tmp_path, words, seg)
+    pause_start = words[2]["end"] - seg["start"] + 0.1
+    seg["keep"] = [[0.0, pause_start], [pause_start + 1.8, seg["end"] - seg["start"]]]
+    cut = run_apply(tmp_path, words, seg)
+    assert [c["text"] for c in cut] == [c["text"] for c in uncut]
+    for before, after in zip(uncut[:3], cut[:3]):
+        assert after["startMs"] == before["startMs"]
+    for before, after in zip(uncut[3:], cut[3:]):
+        assert after["startMs"] == pytest.approx(before["startMs"] - 1800, abs=2)
+        assert after["endMs"] - after["startMs"] == pytest.approx(300, abs=2)

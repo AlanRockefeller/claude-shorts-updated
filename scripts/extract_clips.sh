@@ -25,6 +25,7 @@ fi
 
 mkdir -p "$CLIPS_DIR"
 rm -f "$CLIPS_DIR"/clip_*.mp4
+rm -rf "$CLIPS_DIR/uncut"   # originals kept by jumpcut.py
 
 RESULTS='[]'
 FAILED=0

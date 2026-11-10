@@ -36,7 +36,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from shorts_common import fail, read_json, write_json  # noqa: E402
+from shorts_common import fail, read_json, retime, write_json  # noqa: E402
 
 # Only unambiguous hesitation sounds are removed automatically. Context-dependent
 # fillers ("like", "you know", "right") are left for Claude to judge.
@@ -117,7 +117,8 @@ def cmd_apply(args):
 
         start_ms = seg["start"] * 1000.0
         duration_ms = (seg["end"] - seg["start"]) * 1000.0
-        captions, auto_removed = [], 0
+        keep = seg.get("keep")
+        captions, auto_removed, cut_out = [], 0, 0
         for w in seg_words:
             if w["i"] in delete:
                 continue
@@ -133,6 +134,17 @@ def cmd_apply(args):
 
             cap_start = max(0.0, w["start"] * 1000.0 - start_ms)
             cap_end = min(duration_ms, w["end"] * 1000.0 - start_ms)
+            if keep:
+                # Jump cuts changed the clip's timeline: move the word with it,
+                # and drop words whose audio was cut out.
+                middle, inside = retime((cap_start + cap_end) / 2000.0, keep)
+                if not inside:
+                    cut_out += 1
+                    continue
+                new_start, _ = retime(cap_start / 1000.0, keep)
+                new_end, _ = retime(cap_end / 1000.0, keep)
+                cap_start = new_start * 1000.0
+                cap_end = max(new_end * 1000.0, cap_start + 80.0)
             if cap_end <= cap_start:
                 continue
             caption = {"text": text, "startMs": round(cap_start), "endMs": round(cap_end)}
@@ -149,6 +161,9 @@ def cmd_apply(args):
             "emphasised": len(emphasis & valid),
             "auto_fillers_removed": auto_removed,
         }
+        if keep:
+            entry["jump_cut"] = True
+            entry["words_in_cut_ranges"] = cut_out
         if unknown:
             entry["ignored_indexes_outside_segment"] = unknown
         report.append(entry)

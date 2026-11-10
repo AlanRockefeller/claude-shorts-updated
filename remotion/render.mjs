@@ -209,7 +209,8 @@ async function main() {
         continue;
       }
       const [srcW, srcH] = String(reframe.source_resolution).split("x").map(Number);
-      const durationInSeconds = seg.end - seg.start;
+      // Jump-cut clips are shorter than the source range they came from.
+      const durationInSeconds = seg.render_duration ?? seg.end - seg.start;
       const fps = pickFps(args.fps, reframe.fps);
       const captions = captionsFor(captionData, seg, segId);
 
