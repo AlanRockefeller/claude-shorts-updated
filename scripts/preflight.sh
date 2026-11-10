@@ -138,6 +138,8 @@ jq -n \
     --arg venv "${VENV:-}" \
     --arg root "$ROOT_DIR" \
     --argjson cached "$CACHED_TRANSCRIPT" \
+    --arg profile "$(shorts_profile_path)" \
+    --argjson profile_exists "$([ -f "$(shorts_profile_path)" ] && echo true || echo false)" \
     --argjson has_ytdlp "$(command -v yt-dlp &>/dev/null && echo true || echo false)" \
     --argjson probe "$PROBE" \
     --argjson errors "$(to_json_array ${ERRORS[@]+"${ERRORS[@]}"})" \
@@ -159,6 +161,8 @@ jq -n \
         video_codec: ($v.codec_name // null),
         audio_codec: ($a.codec_name // null),
         yt_dlp_available: $has_ytdlp,
+        profile: $profile,
+        profile_exists: $profile_exists,
         errors: $errors,
         warnings: $warnings
       }'

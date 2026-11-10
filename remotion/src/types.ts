@@ -43,6 +43,16 @@ export type LayoutType = z.infer<typeof Layout>;
 export const Background = z.enum(["blur", "black"]);
 export type BackgroundType = z.infer<typeof Background>;
 
+/** A cutaway shown full-frame over the main video for a few seconds. */
+export const BrollSchema = z.object({
+  src: z.string(),
+  kind: z.enum(["video", "image"]),
+  start: z.number(), // seconds on the short's timeline
+  duration: z.number(),
+  sourceStart: z.number().optional().default(0), // in-point for video files
+});
+export type Broll = z.infer<typeof BrollSchema>;
+
 export const ShortVideoPropsSchema = z.object({
   clipSrc: z.string(),
   sourceWidth: z.number(),
@@ -50,6 +60,13 @@ export const ShortVideoPropsSchema = z.object({
   layout: Layout.optional().default("fill"),
   crop: CropSchema,
   cropKeyframes: z.array(CropKeyframeSchema).optional().default([]),
+  /** pan: glide between keyframes. cut: jump (active-speaker switching). */
+  cropMode: z.enum(["pan", "cut"]).optional().default("pan"),
+  /** Times (s) where the picture toggles between normal and slightly zoomed,
+   *  placed on jump cuts so they read as a camera change rather than a glitch. */
+  punchIns: z.array(z.number()).optional().default([]),
+  punchZoom: z.number().optional().default(1.08),
+  broll: z.array(BrollSchema).optional().default([]),
   panels: z.array(PanelSchema).optional().default([]),
   background: Background.optional().default("blur"),
   captions: z.array(CaptionSchema),

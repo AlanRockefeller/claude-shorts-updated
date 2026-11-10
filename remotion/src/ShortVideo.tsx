@@ -1,5 +1,6 @@
 import { AbsoluteFill } from "remotion";
 import { VideoFrame } from "./components/VideoFrame";
+import { BrollLayer } from "./components/BrollLayer";
 import { Captions } from "./components/Captions";
 import { HookOverlay } from "./components/HookOverlay";
 import { ProgressBar } from "./components/ProgressBar";
@@ -13,6 +14,10 @@ export const ShortVideo: React.FC<ShortVideoProps> = ({
   layout,
   crop,
   cropKeyframes,
+  cropMode,
+  punchIns,
+  punchZoom,
+  broll,
   panels,
   background,
   captions,
@@ -34,9 +39,15 @@ export const ShortVideo: React.FC<ShortVideoProps> = ({
         layout={layout}
         crop={crop}
         cropKeyframes={cropKeyframes}
+        cropMode={cropMode}
+        punchIns={punchIns}
+        punchZoom={punchZoom}
         panels={panels}
         background={background}
       />
+
+      {/* B-roll cutaways (cover the speaker; audio continues underneath) */}
+      {broll && broll.length > 0 && <BrollLayer items={broll} />}
 
       {/* Animated captions */}
       <Captions captions={captions} style={captionStyle} layout={layout} />

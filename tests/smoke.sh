@@ -105,14 +105,40 @@ step "reframe"
     --reframe "$WORK/reframe.json" --output-dir "$WORK/qa" >/dev/null
 jq -e '.clips["clip_01.mp4"].layout == "framed"' "$WORK/reframe.json" >/dev/null
 
+step "b-roll plan"
+mkdir -p "$TMP/broll"
+ffmpeg -nostdin -y -v error -f lavfi -i "color=c=0x2060c0:s=1280x720:d=1" -frames:v 1 "$TMP/broll/blue-card.png"
+"$PYTHON" "$ROOT/scripts/broll.py" catalog --dir "$TMP/broll" --output-dir "$WORK/qa" \
+    | jq -e '.count == 1 and (.images | length == 1)' >/dev/null
+ANCHOR="$(jq '.segments[1].word_start + 12' "$WORK/snapped_segments.json")"
+echo "{\"2\": [{\"file\": \"blue-card.png\", \"from_word\": $ANCHOR, \"to_word\": $((ANCHOR + 5))}]}" \
+    > "$WORK/broll_plan.json"
+"$PYTHON" "$ROOT/scripts/broll.py" apply --plan "$WORK/broll_plan.json" --dir "$TMP/broll" \
+    --segments "$WORK/snapped_segments.json" --transcript "$WORK/transcript.json" \
+    --output "$WORK/broll.json" | jq -e '(.problems | length == 0) and .segments[0].cutaways == 1' >/dev/null
+
 if [ "$RENDER" = true ]; then
     step "render (Remotion)"
     node "$ROOT/remotion/render.mjs" --segments "$WORK/snapped_segments.json" \
         --reframe "$WORK/reframe.json" --captions "$WORK/captions.json" \
-        --clips-dir "$WORK/clips" --output-dir "$WORK/render" --only 2 | tail -1 \
-        | jq -e '.segments_failed == 0' >/dev/null
+        --clips-dir "$WORK/clips" --output-dir "$WORK/render" --broll "$WORK/broll.json" \
+        --only 2 | tail -1 | jq -e '.segments_failed == 0' >/dev/null
+    # The cutaway is really in the picture: mid-cutaway the frame is the blue card.
+    BROLL_AT="$(jq '.by_segment["2"][0] | .start + .duration / 2' "$WORK/broll.json")"
+    ffmpeg -nostdin -v error -ss "$BROLL_AT" -i "$WORK/render/short_02.mp4" -frames:v 1 \
+        -vf "crop=200:200:440:300,scale=1:1" -f rawvideo -pix_fmt rgb24 - | od -An -tu1 \
+        | awk '{ exit !($3 > $1 + 60 && $3 > 120) }'
     "$PYTHON" "$ROOT/scripts/contact_sheet.py" renders --dir "$WORK/render" \
         --output-dir "$WORK/qa" >/dev/null
+
+    step "music bed"
+    ffmpeg -nostdin -y -v error -f lavfi -i "sine=f=880:d=4" "$TMP/music.wav"
+    bash "$ROOT/scripts/add_music.sh" --input-dir "$WORK/render" --music "$TMP/music.wav" \
+        --volume -12 | jq -e '.failed == 0 and (.files | length == 1)' >/dev/null
+    [ -f "$WORK/render/nomusic/short_02.mp4" ]
+    # Video untouched, audio still the same length as the picture.
+    ffprobe -v error -show_entries stream=duration -of json "$WORK/render/short_02.mp4" \
+        | jq -e '[.streams[].duration | tonumber] | (max - min < 0.1)' >/dev/null
 
     step "export + validate"
     bash "$ROOT/scripts/export.sh" --input-dir "$WORK/render" --platform youtube \

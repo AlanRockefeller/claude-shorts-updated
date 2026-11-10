@@ -43,7 +43,7 @@ class FaceDetector:
                                                    min_confidence, 0.3, 5000)
 
     def detect(self, frame):
-        """Return [{cx, cy, w, h, score}] sorted largest-first."""
+        """Return [{cx, cy, w, h, score, mouth, nose}] sorted largest-first."""
         cv2 = self._cv2
         height, width = frame.shape[:2]
         if width > self._detect_width:
@@ -67,6 +67,11 @@ class FaceDetector:
                     "w": w / width,
                     "h": h / height,
                     "score": round(float(face[14]), 3),
+                    # Landmarks (normalised): mouth centre + width, nose tip.
+                    "mouth": ((float(face[10]) + float(face[12])) / 2 / width,
+                              (float(face[11]) + float(face[13])) / 2 / height,
+                              abs(float(face[12]) - float(face[10])) / width),
+                    "nose": (float(face[8]) / width, float(face[9]) / height),
                 })
         results.sort(key=lambda f: f["w"] * f["h"], reverse=True)
         return results

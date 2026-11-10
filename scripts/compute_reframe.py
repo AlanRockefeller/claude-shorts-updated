@@ -5,10 +5,10 @@ Strategies by content type:
 
 - talking-head: 9:16 crop that follows the speaker's face. Static when the
   speaker stays put, a smoothed pan when they move around.
-- podcast: finds each speaker. If both fit one 9:16 crop, frames them together;
-  otherwise produces a stacked split-screen (one speaker per half) instead of
-  cropping the empty space between them. `--no-split` keeps a single crop on
-  the dominant speaker.
+- podcast: finds each speaker. If both fit one 9:16 crop, frames them together.
+  Otherwise cuts to whoever is talking (detected from mouth movement), or, if
+  that cannot be detected reliably, stacks both in a split-screen. Choose
+  explicitly with `--podcast-layout switch|split|single`.
 - screen: framed layout (zoomed content with background fill) that pans to
   follow the mouse cursor.
 
@@ -195,7 +195,34 @@ def split_panels(left, right, src_w, src_h):
     return panels
 
 
-def reframe_faces(clip_path, src_w, src_h, duration, content_type, allow_split):
+def switch_speakers(clip_path, left, right, src_w, src_h):
+    """Single 9:16 crop that cuts to whoever is talking. Returns entry or None
+    when mouth movement does not tell the two speakers apart clearly enough."""
+    import active_speaker
+
+    times, scores = active_speaker.mouth_activity(clip_path, [left["cx"], right["cx"]])
+    switches, confidence = active_speaker.plan_switches(times, scores)
+    if confidence < 0.45:
+        return None, confidence
+
+    crop_w, crop_h = full_height_crop(src_w, src_h)
+    crop_y = (src_h - crop_h) // 2
+    xs = [int(clamp(s["cx"] * src_w - crop_w / 2, 0, src_w - crop_w)) for s in (left, right)]
+    keyframes = [{"t": t, "x": xs[speaker]} for t, speaker in switches]
+    entry = {
+        "strategy": "speaker-switch",
+        "layout": "fill",
+        "crop": {"x": keyframes[0]["x"], "y": crop_y, "w": crop_w, "h": crop_h},
+        "speaker_confidence": confidence,
+        "speaker_cuts": len(keyframes) - 1,
+    }
+    if len(keyframes) > 1:
+        entry["crop_keyframes"] = keyframes
+        entry["crop_mode"] = "cut"   # jump between positions instead of panning
+    return entry, confidence
+
+
+def reframe_faces(clip_path, src_w, src_h, duration, content_type, podcast_layout="auto"):
     """Reframe talking-head / podcast clips. Returns a dict of entry fields."""
     face_frames = detect_face_frames(clip_path)
     speakers = cluster_speakers(face_frames)
@@ -216,7 +243,14 @@ def reframe_faces(clip_path, src_w, src_h, duration, content_type, allow_split):
                 crop = {"x": int(clamp(middle * src_w - crop_w / 2, 0, src_w - crop_w)),
                         "y": (src_h - crop_h) // 2, "w": crop_w, "h": crop_h}
                 return {"strategy": "two-shot", "layout": "fill", "crop": crop, **info}
-            if allow_split:
+            if podcast_layout in ("auto", "switch"):
+                entry, confidence = switch_speakers(clip_path, left, right, src_w, src_h)
+                if entry is not None:
+                    return {**entry, **info}
+                info["speaker_confidence"] = confidence
+                info["note"] = ("could not tell who is speaking from mouth movement; "
+                                "using split-screen instead")
+            if podcast_layout != "single":
                 panels = split_panels(left, right, src_w, src_h)
                 return {"strategy": "split-speakers", "layout": "split",
                         "crop": panels[0]["crop"], "panels": panels, **info}
@@ -307,8 +341,14 @@ def main():
                         help="Screen recordings: fraction of source width to show (default 0.55)")
     parser.add_argument("--no-cursor-track", action="store_true",
                         help="Screen recordings: static centre crop")
+    parser.add_argument("--podcast-layout", default="auto",
+                        choices=["auto", "switch", "split", "single"],
+                        help="Podcast with speakers too far apart for one crop: 'switch' cuts "
+                             "to whoever is talking, 'split' stacks both, 'single' stays on the "
+                             "main speaker. 'auto' (default) switches when the active speaker "
+                             "can be detected reliably, otherwise splits")
     parser.add_argument("--no-split", action="store_true",
-                        help="Podcast: never use the stacked split-screen layout")
+                        help="Same as --podcast-layout single")
     args = parser.parse_args()
 
     if not os.path.isdir(args.clips_dir):
@@ -335,7 +375,8 @@ def main():
             entry = reframe_screen(clip_path, src_w, src_h, args.zoom, not args.no_cursor_track)
         else:
             entry = reframe_faces(clip_path, src_w, src_h, info["duration"],
-                                  args.content_type, not args.no_split)
+                                  args.content_type,
+                                  "single" if args.no_split else args.podcast_layout)
 
         entry.update({
             "source_resolution": f"{src_w}x{src_h}",
@@ -357,7 +398,8 @@ def main():
                "clips_processed": len(results), "computation_time_sec": elapsed, "clips": {}}
     for name, data in results.items():
         item = {k: data[k] for k in ("strategy", "layout", "crop") if k in data}
-        for key in ("speakers", "faces_detected"):
+        for key in ("speakers", "faces_detected", "speaker_confidence", "speaker_cuts",
+                    "crop_mode", "note"):
             if key in data:
                 item[key] = data[key]
         if "crop_keyframes" in data:

@@ -29,6 +29,11 @@ Claude Code guides you through an interactive pipeline:
 - **Caption review** - Claude fixes mis-heard names and jargon, drops fillers, and marks key words for emphasis, without ever shifting caption timing.
 - **3 caption styles** - Bold (ALL CAPS, yellow highlights), Bounce (bouncy spring, rotating colors), Clean (minimal fade-in). Text stays inside the platforms' UI-safe zones.
 - **Jump cuts** - Optionally removes long pauses, "um"s and the fillers Claude flags, from the video itself. Pauses are measured in the real audio, cuts are click-free, and captions are re-timed to match.
+- **Active-speaker switching** - In two-person shots the crop cuts to whoever is talking (detected from mouth movement), falling back to split-screen when it cannot tell.
+- **Punch-in zoom** - A slight zoom alternates at each jump cut so cuts read as camera changes.
+- **B-roll** - Point it at a folder of your own clips and images; Claude looks at them and places cutaways on the words they illustrate.
+- **Music bed** - Optional background track, looped to length and ducked under speech.
+- **Style profile** - Your usual choices (style, platform, pacing, music, spellings, things to avoid) are saved and reused, so later runs ask fewer questions.
 - **Audio-aware boundary snapping** - Never cuts mid-word or mid-sentence.
 - **Proper loudness** - Two-pass normalisation to -14 LUFS.
 - **Linux and macOS** - CUDA for transcription and NVENC for export when an NVIDIA GPU is present; everything also runs on CPU, including on Macs.
@@ -57,7 +62,7 @@ macOS (with [Homebrew](https://brew.sh)):
 brew install ffmpeg jq node python yt-dlp
 ```
 
-On macOS everything runs on the CPU: there is no CUDA, and transcription uses CTranslate2's Apple Accelerate backend. That is comfortable on Apple Silicon; on older Intel Macs use `--model small` for long videos. The scripts are written for the bash 3.2 and BSD tools that ship with macOS, and CI runs the pipeline on a macOS runner.
+On macOS everything runs on the CPU: there is no CUDA, and transcription uses CTranslate2's Apple Accelerate backend. That is comfortable on Apple Silicon; on older Intel Macs use `--model small` for long videos. The scripts are written for the bash 3.2 and BSD tools that ship with macOS, and the CI workflow includes a macOS job.
 
 ## Installation
 
@@ -120,6 +125,7 @@ Output: shorts/my-talk/short_01_yt.mp4, short_03_yt.mp4 (+ short_01.md, short_03
 | Finished shorts | `./shorts/<video-name>/` | pass an output dir to the skill |
 | Work files (transcript cache, clips, renders) | `~/.cache/claude-shorts/<video>-<hash>/` | `SHORTS_TMP` |
 | Python venv | `~/.shorts-skill/` | `SHORTS_VENV` |
+| Style profile | `~/.config/claude-shorts/profile.md` | `SHORTS_PROFILE` |
 
 Work files default to `~/.cache` rather than `/tmp` because `/tmp` is a RAM-backed tmpfs on Arch-based systems.
 
@@ -138,7 +144,10 @@ claude-shorts/
 │   ├── snap_boundaries.py      # Sentence- and silence-aware cut points
 │   ├── extract_clips.sh        # Stream-copy clip extraction
 │   ├── jumpcut.py              # Cut long pauses and fillers out of the clips
-│   ├── compute_reframe.py      # Face tracking, split-screen, cursor tracking
+│   ├── compute_reframe.py      # Face tracking, speaker switching, split-screen, cursor tracking
+│   ├── active_speaker.py       # Who is talking, from mouth movement
+│   ├── broll.py                # B-roll catalogue and word-anchored timing
+│   ├── add_music.sh            # Music bed with ducking
 │   ├── captions.py             # Per-segment caption tracks + Claude's edits
 │   ├── export.sh               # Platform encodes, two-pass loudnorm
 │   ├── validate.sh             # Output checks
@@ -166,7 +175,7 @@ claude-shorts/
 | Content Type | Layout | Notes |
 |--------------|--------|-------|
 | **Talking-head** | Full-frame 9:16 crop on the speaker | Static when they sit still, smooth pan when they move |
-| **Podcast** | Both speakers in one crop, or stacked split-screen | Split is used when they are too far apart for one crop (`--no-split` to disable) |
+| **Podcast** | Both speakers in one crop, cuts to the active speaker, or stacked split-screen | When they are too far apart for one crop: switch if the speaker can be detected, else split (`--podcast-layout`) |
 | **Screen recording** | Zoomed inset over a blurred backdrop | Pans to follow the cursor; `--zoom` sets how much of the screen is shown |
 
 ## Platform Export Specs

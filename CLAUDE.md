@@ -37,8 +37,11 @@ caption_edits.json                 written by Claude  (delete / replace / emphas
 clips/uncut/, segments[].keep      jumpcut.py         (optional: recuts clips, records kept ranges
                                                        and render_duration in snapped_segments.json)
 captions.json                      captions.py apply  (clip-local ms, re-timed through `keep`)
-reframe.json                       compute_reframe.py (layout: fill | framed | split; run on the cut clips)
-render/short_NN.mp4                remotion/render.mjs
+reframe.json                       compute_reframe.py (layout: fill | framed | split; crop_mode pan | cut;
+                                                       run on the cut clips)
+broll_plan.json -> broll.json      written by Claude -> broll.py apply (optional; word-anchored cutaways)
+render/short_NN.mp4                remotion/render.mjs (punch-ins from segments[].keep, --broll)
+render/nomusic/                    add_music.sh        (optional; originals before the music bed)
 qa/*.jpg                           contact_sheet.py
 ```
 

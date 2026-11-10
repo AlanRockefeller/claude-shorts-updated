@@ -103,6 +103,12 @@ def crop_x_at(entry, t):
     keyframes = entry.get("crop_keyframes") or []
     if len(keyframes) < 2:
         return entry["crop"]["x"]
+    if entry.get("crop_mode") == "cut":
+        current = keyframes[0]["x"]
+        for key in keyframes:
+            if key["t"] <= t:
+                current = key["x"]
+        return current
     if t <= keyframes[0]["t"]:
         return keyframes[0]["x"]
     for a, b in zip(keyframes, keyframes[1:]):

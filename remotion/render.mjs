@@ -46,19 +46,30 @@ function readJson(file, label) {
   }
 }
 
-/** Serve clip files over HTTP (with Range support) for the Remotion renderer. */
-function startClipServer(clipsDir) {
+const MIME = {
+  ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+  ".mkv": "video/x-matroska", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+  ".webp": "image/webp",
+};
+
+/**
+ * Serve clip files over HTTP (with Range support) for the Remotion renderer.
+ * `extraFiles` maps a URL name to an absolute path (b-roll that lives elsewhere);
+ * nothing outside the clips directory and that map is reachable.
+ */
+function startClipServer(clipsDir, extraFiles = new Map()) {
   const root = path.resolve(clipsDir);
   const server = http.createServer((req, res) => {
     const name = path.basename(decodeURIComponent((req.url || "/").split("?")[0]));
-    const filePath = path.join(root, name);
+    const filePath = extraFiles.get(name) || path.join(root, name);
     if (!name || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
       res.writeHead(404);
       res.end("Not found");
       return;
     }
     const { size } = fs.statSync(filePath);
-    const headers = { "Content-Type": "video/mp4", "Accept-Ranges": "bytes" };
+    const type = MIME[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+    const headers = { "Content-Type": type, "Accept-Ranges": "bytes" };
     const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || "");
     if (range && (range[1] || range[2])) {
       const start = range[1] ? parseInt(range[1], 10) : Math.max(0, size - parseInt(range[2], 10));
@@ -99,6 +110,26 @@ function pickFps(option, sourceFps) {
   return Math.round(fps); // 29.97 -> 30, 23.976 -> 24, 59.94 -> 60
 }
 
+/**
+ * Where to punch in: the joins left by jump cuts, on the short's timeline.
+ * Joins that follow the previous one too closely are skipped so the framing
+ * does not flicker.
+ */
+function punchInTimes(seg, minGap = 1.5) {
+  const keep = seg.keep || [];
+  const times = [];
+  let elapsed = 0;
+  let last = -Infinity;
+  for (let i = 0; i < keep.length - 1; i++) {
+    elapsed += keep[i][1] - keep[i][0];
+    if (elapsed - last >= minGap) {
+      times.push(Number(elapsed.toFixed(3)));
+      last = elapsed;
+    }
+  }
+  return times;
+}
+
 /** Captions for a segment, in clip-local milliseconds. */
 function captionsFor(captionData, seg, segId) {
   if (captionData.by_segment) {
@@ -122,6 +153,9 @@ const USAGE = `Usage: node render.mjs --segments FILE --reframe FILE --captions 
   [--fps auto|N]                output frame rate (default: follow source, max 60)
   [--background blur|black]     backdrop for the framed (screen recording) layout
   [--only 2,5]                  render only these segment ids
+  [--broll FILE]                b-roll cutaways (broll.json from broll.py apply)
+  [--no-punch-in]               do not alternate a slight zoom at jump cuts
+  [--punch-zoom 1.08]           how far to zoom in on alternate jump-cut sections
   [--concurrency N]             parallel browser tabs (default: half the CPU cores)
   [--crf N]                     x264 quality of the intermediate (default 16)
   [--no-hook] [--no-progress-bar]`;
@@ -143,6 +177,9 @@ async function main() {
       background: { type: "string", default: "blur" },
       only: { type: "string" },
       concurrency: { type: "string" },
+      broll: { type: "string" },
+      "punch-zoom": { type: "string", default: "1.08" },
+      "no-punch-in": { type: "boolean", default: false },
       crf: { type: "string", default: "16" },
       "no-progress-bar": { type: "boolean", default: false },
       "no-hook": { type: "boolean", default: false },
@@ -172,7 +209,19 @@ async function main() {
 
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const { server: clipServer, baseUrl } = await startClipServer(clipsDir);
+  // B-roll files can live anywhere; expose each one under a generated name.
+  const brollData = args.broll ? readJson(args.broll, "b-roll plan") : { by_segment: {} };
+  const extraFiles = new Map();
+  const brollBySegment = {};
+  for (const [segId, items] of Object.entries(brollData.by_segment || {})) {
+    brollBySegment[segId] = items.map((item) => {
+      const name = `broll_${extraFiles.size}${path.extname(item.path).toLowerCase()}`;
+      extraFiles.set(name, path.resolve(item.path));
+      return { name, kind: item.kind, start: item.start, duration: item.duration, sourceStart: item.source_start || 0 };
+    });
+  }
+
+  const { server: clipServer, baseUrl } = await startClipServer(clipsDir, extraFiles);
 
   log({ action: "bundle", status: "starting" });
   const startBundle = Date.now();
@@ -221,6 +270,14 @@ async function main() {
         layout: reframe.layout || "fill",
         crop: reframe.crop,
         cropKeyframes: reframe.crop_keyframes || [],
+        cropMode: reframe.crop_mode || "pan",
+        // Punch-ins suit people on camera; on screen recordings they just look like a glitch.
+        punchIns: args["no-punch-in"] || (reframe.layout || "fill") === "framed" ? [] : punchInTimes(seg),
+        punchZoom: Number(args["punch-zoom"]),
+        broll: (brollBySegment[String(segId)] || []).map(({ name, ...rest }) => ({
+          src: `${baseUrl}/${name}`,
+          ...rest,
+        })),
         panels: reframe.panels || [],
         background: args.background,
         captions,
@@ -241,6 +298,8 @@ async function main() {
         fps,
         layout: inputProps.layout,
         caption_words: captions.length,
+        punch_ins: inputProps.punchIns.length,
+        broll: inputProps.broll.length,
         status: "starting",
       });
 

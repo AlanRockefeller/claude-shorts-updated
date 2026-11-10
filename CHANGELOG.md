@@ -28,7 +28,12 @@ Modernisation pass. Work files and command lines changed; re-run `bash install.s
 
 ### Added
 - **Jump cuts** (`jumpcut.py`): optionally remove long pauses and filler words from the clips themselves. Pauses come from the real audio (threshold relative to the clip's loudness), fillers from the transcript ("um/uh" plus the words Claude deletes during caption review). Audio is cut sample-accurately with short fades, video on frame boundaries without accumulating drift, and captions are re-timed. Re-runnable and reversible (`--restore`).
-- **macOS support**: shell scripts work with bash 3.2 and BSD tools, setup finds a Homebrew Python when the system one is too old, and CI runs the pipeline on a macOS runner.
+- **Active-speaker switching** (`active_speaker.py`, `compute_reframe.py --podcast-layout`): for two speakers who do not fit one crop, cut to whoever is talking, found from mouth-region motion. Cuts need a clear lead held for a moment and are never closer than 1.5 s; falls back to split-screen when detection is not confident.
+- **Punch-in zoom at jump cuts**: the renderer alternates an 8% zoom at each jump-cut join (people on camera only; `--no-punch-in`, `--punch-zoom`).
+- **B-roll** (`broll.py`, `render.mjs --broll`): catalogue a folder of clips/images as thumbnail sheets for Claude, then place full-frame cutaways anchored to transcript words, correctly re-timed through jump cuts. Stills get a slow push-in.
+- **Music bed** (`add_music.sh`): loop a track to length, fade it out, and duck it under speech with a sidechain compressor; re-runnable and removable.
+- **Style profile**: saved preferences and standing notes in `~/.config/claude-shorts/profile.md`, read at the start of each run.
+- **macOS support**: shell scripts work with bash 3.2 and BSD tools, setup finds a Homebrew Python when the system one is too old, and the CI workflow includes a macOS job.
 - Visual QA: contact sheets of the source, the computed crops, and the rendered shorts for Claude to inspect (`contact_sheet.py`).
 - Face tracking that pans to follow a moving speaker; split-screen podcast layout; blurred backdrop for screen recordings.
 - Caption review by Claude: fix mis-heard words, delete fillers, mark emphasis words (rendered in an accent colour).

@@ -2,6 +2,9 @@ import { AbsoluteFill, OffthreadVideo, useCurrentFrame, useVideoConfig, interpol
 import { FRAMED_TOP, HEIGHT, WIDTH } from "../styles/layout";
 import type { BackgroundType, Crop, CropKeyframe, LayoutType, Panel } from "../types";
 
+/** Zoom towards the upper-middle of the frame, where faces usually are. */
+const PUNCH_ORIGIN = "50% 38%";
+
 interface VideoFrameProps {
   clipSrc: string;
   sourceWidth: number;
@@ -11,6 +14,9 @@ interface VideoFrameProps {
   cropKeyframes?: CropKeyframe[];
   panels?: Panel[];
   background: BackgroundType;
+  cropMode?: "pan" | "cut";
+  punchIns?: number[];
+  punchZoom?: number;
 }
 
 interface CroppedVideoProps {
@@ -77,6 +83,9 @@ export const VideoFrame: React.FC<VideoFrameProps> = ({
   cropKeyframes,
   panels,
   background,
+  cropMode = "pan",
+  punchIns = [],
+  punchZoom = 1.08,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -84,13 +93,23 @@ export const VideoFrame: React.FC<VideoFrameProps> = ({
   if (!clipSrc) return null;
 
   const common = { clipSrc, sourceWidth, sourceHeight };
+  const now = frame / fps;
+
+  // Alternate between normal and punched-in framing at each marked cut.
+  const punched = punchIns.filter((t) => t <= now + 1e-6).length % 2 === 1;
+  const punchStyle: React.CSSProperties = {
+    transform: `scale(${punched ? punchZoom : 1})`,
+    transformOrigin: PUNCH_ORIGIN,
+  };
 
   if (layout === "split" && panels && panels.length >= 2) {
     const panelHeight = HEIGHT / 2;
     return (
       <AbsoluteFill>
-        <CroppedVideo {...common} crop={panels[0].crop} width={WIDTH} height={panelHeight} top={0} muted={false} />
-        <CroppedVideo {...common} crop={panels[1].crop} width={WIDTH} height={panelHeight} top={panelHeight} muted />
+        <AbsoluteFill style={punchStyle}>
+          <CroppedVideo {...common} crop={panels[0].crop} width={WIDTH} height={panelHeight} top={0} muted={false} />
+          <CroppedVideo {...common} crop={panels[1].crop} width={WIDTH} height={panelHeight} top={panelHeight} muted />
+        </AbsoluteFill>
         <div
           style={{
             position: "absolute",
@@ -105,15 +124,21 @@ export const VideoFrame: React.FC<VideoFrameProps> = ({
     );
   }
 
-  // Animated pan (face or cursor tracking)
+  // Moving crop: glide (face or cursor tracking) or jump (speaker switching)
   let cropX = crop.x;
   if (cropKeyframes && cropKeyframes.length >= 2) {
-    cropX = interpolate(
-      frame / fps,
-      cropKeyframes.map((k) => k.t),
-      cropKeyframes.map((k) => k.x),
-      { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-    );
+    if (cropMode === "cut") {
+      for (const key of cropKeyframes) {
+        if (key.t <= now + 1e-6) cropX = key.x;
+      }
+    } else {
+      cropX = interpolate(
+        now,
+        cropKeyframes.map((k) => k.t),
+        cropKeyframes.map((k) => k.x),
+        { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+      );
+    }
   }
   const activeCrop = { ...crop, x: cropX };
 
@@ -142,5 +167,9 @@ export const VideoFrame: React.FC<VideoFrameProps> = ({
     );
   }
 
-  return <CroppedVideo {...common} crop={activeCrop} width={WIDTH} height={HEIGHT} top={0} muted={false} />;
+  return (
+    <AbsoluteFill style={punchStyle}>
+      <CroppedVideo {...common} crop={activeCrop} width={WIDTH} height={HEIGHT} top={0} muted={false} />
+    </AbsoluteFill>
+  );
 };

@@ -82,3 +82,8 @@ shorts_hash8() {
         printf '%s' "$1" | cksum | cut -d' ' -f1
     fi
 }
+
+# Saved preferences (caption style, platform, jump cuts, music, b-roll folder...).
+shorts_profile_path() {
+    echo "${SHORTS_PROFILE:-${XDG_CONFIG_HOME:-$HOME/.config}/claude-shorts/profile.md}"
+}

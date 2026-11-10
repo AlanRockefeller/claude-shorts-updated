@@ -345,3 +345,72 @@ def test_captions_follow_jump_cuts(tmp_path, capsys):
     for before, after in zip(uncut[3:], cut[3:]):
         assert after["startMs"] == pytest.approx(before["startMs"] - 1800, abs=2)
         assert after["endMs"] - after["startMs"] == pytest.approx(300, abs=2)
+
+
+# --- active speaker, b-roll -------------------------------------------------------------
+
+import active_speaker  # noqa: E402
+import broll  # noqa: E402
+
+
+def activity(pattern, step=0.1):
+    """pattern: [(seconds, left_level, right_level)] -> (times, [left, right])"""
+    times, left, right = [], [], []
+    t = 0.0
+    for seconds, a, b in pattern:
+        for _ in range(int(round(seconds / step))):
+            times.append(round(t, 2)); left.append(a); right.append(b)
+            t += step
+    return times, [left, right]
+
+
+def test_switches_follow_the_speaker():
+    times, scores = activity([(6, 5.0, 0.3), (6, 0.2, 4.0), (5, 6.0, 0.4)])
+    switches, confidence = active_speaker.plan_switches(times, scores)
+    assert [s for _, s in switches] == [0, 1, 0]
+    assert abs(switches[1][0] - 6.0) < 0.8 and abs(switches[2][0] - 12.0) < 0.8
+    assert confidence > 0.8
+
+
+def test_brief_interjections_do_not_cause_a_cut():
+    # The other person says "yeah" for 0.3 s: stay on the main speaker.
+    times, scores = activity([(5, 5.0, 0.2), (0.3, 0.3, 5.0), (5, 5.0, 0.2)])
+    switches, _ = active_speaker.plan_switches(times, scores)
+    assert switches == [(0.0, 0)]
+
+
+def test_cuts_are_never_closer_than_the_minimum_hold():
+    times, scores = activity([(1, 5, 0.1), (1, 0.1, 5), (1, 5, 0.1), (1, 0.1, 5), (4, 5, 0.1)])
+    switches, _ = active_speaker.plan_switches(times, scores, min_hold=1.5)
+    gaps = [b[0] - a[0] for a, b in zip(switches, switches[1:])]
+    assert all(g >= 1.5 - 1e-6 for g in gaps)
+
+
+def test_no_mouth_movement_gives_no_confidence():
+    times, scores = activity([(10, 0.0, 0.0)])
+    switches, confidence = active_speaker.plan_switches(times, scores)
+    assert confidence == 0.0 and len(switches) == 1
+
+
+def test_broll_is_anchored_to_words_through_jump_cuts(tmp_path):
+    image = tmp_path / "chart.png"
+    image.write_bytes(b"x")
+    words = make_words(["Nobody tells you the hidden cost of scaling a team."], start=10.0)
+    index = {w["i"]: w for w in words}
+    seg = {"id": 1, "start": 9.9, "end": words[-1]["end"] + 0.3}
+    item = {"file": "chart.png", "from_word": 4, "to_word": 9}
+
+    plain, problem = broll.resolve_item(item, seg, index, str(tmp_path))
+    assert problem is None and plain["kind"] == "image"
+    assert plain["start"] == pytest.approx(words[4]["start"] - 9.9 - broll.LEAD, abs=0.01)
+
+    # Cut 1 s out of the clip before the anchor word: the cutaway moves 1 s earlier.
+    seg_cut = dict(seg, keep=[[0.0, 0.5], [1.5, seg["end"] - seg["start"]]],
+                   render_duration=seg["end"] - seg["start"] - 1.0)
+    moved, problem = broll.resolve_item(item, seg_cut, index, str(tmp_path))
+    assert problem is None
+    assert moved["start"] == pytest.approx(plain["start"] - 1.0, abs=0.01)
+    assert moved["start"] + moved["duration"] <= seg_cut["render_duration"] + 1e-6
+
+    missing, problem = broll.resolve_item({"file": "nope.mp4", "from_word": 4}, seg, index, str(tmp_path))
+    assert missing is None and "not found" in problem

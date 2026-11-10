@@ -70,6 +70,13 @@ Preflight validates the input and tools, and allocates WORK and OUT. If `pass` i
 false, show the errors and stop (most are fixed by `bash ROOT/setup.sh`). Surface any
 warnings and ask whether to continue.
 
+**Style profile.** Preflight prints `profile` (a path) and `profile_exists`. If it
+exists, read it now: it holds this user's usual choices (caption style, platform,
+jump cuts, clip length, hook tone, music track, b-roll folder) and notes from earlier
+runs. Treat it as the defaults for everything below, tell the user in one line which
+settings you are taking from it, and only ask about what it does not cover or what
+they want to change this time.
+
 Report: duration, resolution, GPU status, and whether a cached transcript exists
 (`transcript_cached`). Without a GPU, warn the user before starting that
 transcription runs on the CPU and can take a while for long videos (`--model small`
@@ -162,7 +169,8 @@ Show the candidates in a table:
 | 2 | 12:45 → 13:28 | 43s  | 82    | "Here's the exact framework..."  | Complete actionable method, clean arc  |
 ```
 
-Then ask with AskUserQuestion:
+Then ask with AskUserQuestion (at most four questions per call; skip any the style
+profile already answers, and offer "same as usual" when a profile exists):
 1. **Which segments?** — all, specific numbers, or "none, re-analyze"
 2. **Caption style?** — bold (ALL CAPS pop-in), bounce (bouncy colourful), clean (minimal)
 3. **Platform?** — youtube, tiktok, instagram, or all
@@ -170,6 +178,10 @@ Then ask with AskUserQuestion:
    talking-head and podcast), "pauses only", or "no". Recommend "no" for screen
    recordings and demos, where silent stretches often show something happening, and
    for videos with background music, where every cut is audible in the music.
+5. **Background music?** — only if the user has a track (their own or licensed);
+   ask for the file. Skip the question if they have never used music.
+6. **B-roll?** — only if the user has a folder of cutaway footage or images
+   (their own clips, screen captures, product shots, licensed stock); ask for the folder.
 
 ### Step 6: APPROVE
 
@@ -275,6 +287,9 @@ Shortens pauses longer than 0.5 s to 0.2 s and cuts out the deleted words and
 hesitation sounds, re-encoding each clip (the originals stay in `WORK/clips/uncut/`).
 Pauses are found in the real audio and words that stay are never cut into.
 
+- at each jump cut the renderer alternates a slight zoom ("punch-in"), which makes
+  the cut read as a camera change instead of a glitch. It is automatic for people on
+  camera; `render.mjs --no-punch-in` turns it off
 - "pauses only" → add `--no-fillers`
 - a more relaxed feel → `--max-pause 0.8 --keep-pause 0.35`; punchier → `--max-pause 0.35 --keep-pause 0.12`
 - `--dry-run` shows what would be removed; `--restore` undoes the cuts
@@ -305,12 +320,57 @@ python3 ROOT/scripts/contact_sheet.py reframe --clips-dir WORK/clips \
 Read each `WORK/qa/reframe_clip_NN.jpg`. The coloured boxes are the crops. Check that
 every speaker is inside their box, heads are not cut off, and for screen recordings
 that the important content is inside. If a crop is wrong:
-- wrong layout → re-run with a different `--content-type`, `--no-split` (podcast) or
-  `--no-cursor-track` / `--zoom 0.7` (screen)
+- wrong layout → re-run with a different `--content-type`, `--podcast-layout`
+  (podcast) or `--no-cursor-track` / `--zoom 0.7` (screen)
 - only one clip is off → edit that clip's entry in `WORK/reframe.json` directly
   (`crop.x`, or delete `crop_keyframes` for a static crop)
 
-If you re-run `extract_clips.sh` or change the jump cuts later, repeat 8c–8e.
+**Podcasts with two speakers.** When both do not fit in one crop, the default
+(`--podcast-layout auto`) cuts to whoever is talking, detected from mouth movement
+(`strategy: speaker-switch`, with `speaker_confidence` and `speaker_cuts` in the
+output). If it cannot tell reliably it falls back to the stacked split-screen and
+says so in `note`. Force a choice with `--podcast-layout switch|split|single`.
+Speaker detection is a visual heuristic: on the contact sheet, check that the box is
+on the person who is actually talking at those moments (compare with the captions),
+and prefer `split` if it is wrong or the cutting feels restless.
+
+**8f. B-roll** (only if the user gave a folder)
+
+```bash
+python3 ROOT/scripts/broll.py catalog --dir "BROLL_DIR" --output-dir WORK/qa
+```
+
+Read the `broll_catalog_NN.jpg` sheets and the file list it prints, so you know what
+each file actually shows. Then, using `WORK/caption_words.txt`, write
+`WORK/broll_plan.json`: cutaways anchored to the words they illustrate.
+
+```json
+{
+  "1": [
+    {"file": "dashboard.mp4", "from_word": 421, "to_word": 428, "source_start": 3},
+    {"file": "office.jpg", "from_word": 440, "to_word": 446}
+  ]
+}
+```
+
+- Use a cutaway only where the picture genuinely shows what is being said (the
+  product when it is named, the chart when the number is quoted). No match, no b-roll:
+  a loosely related clip is worse than staying on the speaker.
+- Keep the speaker on screen for the hook (the first ~3 s) and the payoff line.
+- 2–5 s each, and at most about a third of a short in total.
+- `source_start` picks the moment inside a video file; choose one you saw on the sheet
+  or leave it at 0.
+
+```bash
+python3 ROOT/scripts/broll.py apply --plan WORK/broll_plan.json --dir "BROLL_DIR" \
+    --segments WORK/snapped_segments.json --transcript WORK/transcript.json \
+    --output WORK/broll.json
+```
+
+It reports the exact timings, coverage per short and any problems (missing file,
+overlap). Pass `--broll WORK/broll.json` to the renderer in Step 9.
+
+If you re-run `extract_clips.sh` or change the jump cuts later, repeat 8c–8f.
 
 ### Step 9: RENDER
 
@@ -321,7 +381,8 @@ node ROOT/remotion/render.mjs \
     --captions WORK/captions.json \
     --style STYLE \
     --clips-dir WORK/clips \
-    --output-dir WORK/render
+    --output-dir WORK/render \
+    [--broll WORK/broll.json]
 ```
 
 Renders can take minutes; run long batches in the background and report each
@@ -339,6 +400,18 @@ Read each `WORK/qa/render_short_NN.jpg` (three frames per short) and check: hook
 fully visible and not clipped; captions readable and not covering a face or key
 on-screen content; framing as intended; no black or frozen frames. Fix and re-render
 (`--only`) anything that fails before moving on. Tell the user what you checked.
+
+**Music** (only if the user gave a track), after the renders pass your check:
+
+```bash
+bash ROOT/scripts/add_music.sh --input-dir WORK/render --music "TRACK" [--volume -20]
+```
+
+The music is looped to length, faded out at the end and ducked under speech.
+`--volume` is in dB (−20 is a quiet bed, −14 is prominent), `--start 30` begins 30 s
+into the track, `--only 2,5` limits it to some shorts, `--remove` takes it off again.
+It can be re-run with other settings. Only use music the user has the rights to; the
+platforms mute or block videos with unlicensed tracks.
 
 ### Step 10: EXPORT
 
@@ -367,6 +440,29 @@ Present the final summary:
 Then offer to delete WORK (the transcript cache lives there; keeping it makes a
 second pass on the same video instant).
 
+**Save the style profile.** If there is no profile yet, or the user chose something
+different from it this time, offer to save their choices to the `profile` path from
+preflight (create the directory if needed). Keep it short and human-editable:
+
+```markdown
+# claude-shorts profile
+caption_style: bold
+platform: all
+jump_cuts: pauses and fillers
+clip_length: 20-60s
+podcast_layout: auto
+music: /home/me/Music/bed.mp3 (volume -20)
+broll_dir: /home/me/Videos/broll
+
+## Notes
+- Hooks: plain statements, no questions, no emoji.
+- Never clip the sponsor read.
+- Spell the product "OmniRoute", one word.
+```
+
+Record standing preferences and corrections the user gave you (spellings, things to
+avoid, tone), not details of this particular video.
+
 ## Rules
 
 1. **Never render without approval.** Always present candidates and wait for the
@@ -391,31 +487,9 @@ second pass on the same video instant).
 
 See `ROOT/references/caption-styles.md` for visual specs.
 
-## Options at a Glance
+## Options and Troubleshooting
 
-| Setting | Default | How to change |
-|---------|---------|---------------|
-| Whisper model | `large-v3-turbo` | `transcribe.py --model large-v3` / `small` |
-| Clip length | 20–60 s | Choose longer candidates; `snap_boundaries.py --max-duration` |
-| Screen zoom | 0.55 of source width | `compute_reframe.py --zoom 0.7` |
-| Podcast layout | split-screen when speakers are far apart | `--no-split` |
-| Jump cuts | ask the user; pauses > 0.5 s cut to 0.2 s | `jumpcut.py --max-pause/--keep-pause/--no-fillers` |
-| Output frame rate | follows source (max 60) | `render.mjs --fps 30` |
-| Work directory | `~/.cache/claude-shorts/` | `SHORTS_TMP` env var |
-| Browser for rendering | Remotion's Chrome Headless Shell | `SHORTS_CHROME=/usr/bin/chromium` |
-
-## Troubleshooting
-
-- **Transcription fell back to CPU** — the JSON `note` says why and names the exact
-  packages to install. Usually the CUDA runtime libraries are missing from the venv:
-  re-run `bash ROOT/setup.sh`, or `python3 ROOT/scripts/cuda_libs.py` to see what is
-  needed.
-- **Out of GPU memory** — `--model small`, or `--compute-type int8_float16`.
-- **Render cannot start a browser** — set `SHORTS_CHROME` to an installed
-  Chrome/Chromium, or run `npx remotion browser ensure` in `ROOT/remotion`.
-- **Render fails after an update** — `(cd ROOT/remotion && npm ci)`.
-- **Jump cuts removed too much or sound choppy** — `jumpcut.py --restore`, then
-  re-run with `--no-fillers` or a larger `--max-pause`, and repeat 8d–8e.
-- **Export fails** — read the `.export.log` path it prints; try `--cpu`.
-- **Disk full** — WORK holds clips and renders; delete old run directories under
-  the work directory or point `SHORTS_TMP` at a bigger disk.
+Every tunable setting (models, clip length, zoom, layouts, jump-cut timing, music,
+b-roll, paths) and fixes for common failures are in
+`ROOT/references/options-and-troubleshooting.md`. Read it when the user asks for
+something non-default or a step fails.
