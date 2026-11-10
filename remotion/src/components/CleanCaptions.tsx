@@ -1,11 +1,7 @@
-import { useCurrentFrame, useVideoConfig, interpolate } from "remotion";
-import { useCaptionPages } from "../hooks/useCaptionPages";
+import { interpolate } from "remotion";
+import { useCurrentCaptionPage } from "../hooks/useCaptionPages";
 import { CLEAN_THEME } from "../styles/theme";
 import type { Caption } from "../types";
-
-interface CleanCaptionsProps {
-  captions: Caption[];
-}
 
 /**
  * Clean-style captions: Minimal fade-in, white text with subtle shadow,
@@ -13,62 +9,49 @@ interface CleanCaptionsProps {
  *
  * Font: Inter Bold
  * Words per page: 3-5 (1500ms combine window)
- * Animation: Fade-in opacity 0 → 1 over 6 frames
+ * Animation: Fade-in opacity 0 → 1 over 6 frames (at 30 fps)
  */
-export const CleanCaptions: React.FC<CleanCaptionsProps> = ({ captions }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const currentTimeMs = (frame / fps) * 1000;
-
-  const pages = useCaptionPages(captions, 1500);
-
-  const currentPage = pages.find(
-    (p) =>
-      currentTimeMs >= p.startMs &&
-      currentTimeMs < p.startMs + p.durationMs
+export const CleanCaptions: React.FC<{ captions: Caption[] }> = ({ captions }) => {
+  const { page, pageFrame, currentTimeMs, emphasised, fps } = useCurrentCaptionPage(
+    captions,
+    1500
   );
+  if (!page) return null;
 
-  if (!currentPage) return null;
-
-  const pageStartFrame = Math.floor((currentPage.startMs / 1000) * fps);
-  const localFrame = frame - pageStartFrame;
-
-  // Fade-in over 6 frames
-  const opacity = interpolate(localFrame, [0, 6], [0, 1], {
+  const opacity = interpolate(pageFrame, [0, fps / 5], [0, 1], {
     extrapolateRight: "clamp",
   });
 
   return (
     <div
       style={{
-        position: "absolute",
-        bottom: 350,
-        left: 60,
-        right: 60,
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
+        flexWrap: "wrap",
+        columnGap: 14,
         opacity,
       }}
     >
-      {currentPage.tokens.map((token, i) => {
-        const isActive =
-          currentTimeMs >= token.fromMs && currentTimeMs < token.toMs;
+      {page.tokens.map((token, i) => {
+        const isActive = currentTimeMs >= token.fromMs && currentTimeMs < token.toMs;
+        const color = emphasised.has(token.fromMs)
+          ? CLEAN_THEME.emphasisColor
+          : isActive
+            ? CLEAN_THEME.activeColor
+            : CLEAN_THEME.textColor;
 
         return (
           <span
-            key={`${currentPage.startMs}-${i}`}
+            key={`${page.startMs}-${i}`}
             style={{
               fontFamily: "'Inter', sans-serif",
               fontWeight: 700,
               fontSize: 56,
-              color: isActive
-                ? CLEAN_THEME.activeColor
-                : CLEAN_THEME.textColor,
-              textShadow: `2px 2px 8px ${CLEAN_THEME.shadowColor}`,
+              color,
+              textShadow: `0 2px 10px ${CLEAN_THEME.shadowColor}, 0 0 3px ${CLEAN_THEME.shadowColor}`,
               lineHeight: 1.3,
               textAlign: "center",
-              marginRight: 8,
             }}
           >
             {token.text.trim()}

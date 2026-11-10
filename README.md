@@ -2,97 +2,108 @@
 
 ![claude-shorts header](claude-shorts-header.jpeg)
 
-Interactive longform-to-shortform video creator powered by [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Extracts viral-ready vertical clips from long videos using Claude as the intelligent orchestrator with Remotion-rendered premium animated captions.
+Interactive longform-to-shortform video creator powered by [Claude Code](https://code.claude.com/docs). Extracts viral-ready vertical clips from long videos using Claude as the intelligent orchestrator with Remotion-rendered premium animated captions.
+
+> This is an updated fork of [AgriciDaniel/claude-shorts](https://github.com/AgriciDaniel/claude-shorts). See [CHANGELOG.md](CHANGELOG.md) for what changed in v2.
 
 ## How It Works
 
-Claude Code guides you through a 10-step interactive pipeline:
+Claude Code guides you through an interactive pipeline:
 
-1. **Preflight** - Validates input video, checks disk space, detects GPU
-2. **Transcribe** - GPU-accelerated transcription with word-level timestamps (faster-whisper)
-3. **Detect Content** - Auto-classifies: talking-head, screen recording, or podcast
-4. **Analyze** - Claude reads the full transcript and scores 8-12 candidate segments
-5. **Present** - Shows candidates in a formatted table with scores, hooks, and rationale
+1. **Preflight** - Validates the input (file or URL), tools and disk space; allocates a per-video work directory
+2. **Transcribe** - faster-whisper with word-level timestamps (GPU if available, cached per video)
+3. **Look** - Claude views a contact sheet of the video and picks the layout: talking-head, podcast, or screen recording
+4. **Analyze** - Claude reads a compact timestamped transcript and scores candidate segments
+5. **Present** - Candidates in a table with scores, hooks, and rationale
 6. **Approve** - You pick segments, adjust timecodes, choose caption style and platform
-7. **Snap Boundaries** - Aligns cut points to word boundaries, sentence endings, and audio silences
-8. **Prepare** - Extracts clips (FFmpeg stream copy) and computes reframe coordinates
-9. **Render** - Remotion renders 1080x1920 vertical video with animated captions
-10. **Export** - Platform-optimized encoding (YouTube Shorts, TikTok, Instagram Reels)
-
-## Demo
-
-> Demo video/GIF coming soon — showing the full pipeline from input to rendered short with Bold-style captions.
+7. **Snap Boundaries** - Cut points move to sentence boundaries and real silences
+8. **Prepare** - Clips are cut, Claude reviews the caption text, long pauses and fillers are jump-cut out (optional), and the result is reframed
+9. **Render** - Remotion renders 1080x1920 video with animated captions; Claude checks frames of the result
+10. **Export** - Platform-optimized encoding, validation, and upload copy (title, description, hashtags)
 
 ## Features
 
-- **Claude-powered segment scoring** - 5-dimension rubric (hook strength, coherence, emotion, value density, payoff) with weighted scoring. No heuristic keyword matching - Claude understands narrative arcs.
-- **3 caption styles** - Bold (ALL CAPS, yellow highlights), Bounce (bouncy spring, rotating colors), Clean (minimal fade-in)
-- **Cursor tracking** - For screen recordings, detects mouse cursor via frame differencing and smoothly pans the crop to follow it
-- **Audio-aware boundary snapping** - Never cuts mid-word or mid-sentence. Extends to natural sentence endings and silence points.
-- **Remotion rendering** - React-based single-pass rendering with spring animations, word-level karaoke highlighting, hook text overlays, and progress bars
-- **GPU acceleration** - CUDA for transcription, NVENC for export encoding (falls back to CPU gracefully)
+- **Claude-powered segment scoring** - 5-dimension rubric (hook strength, coherence, emotion, value density, payoff). No keyword heuristics: Claude reads the whole transcript.
+- **Visual checks** - Claude looks at contact sheets of the source, the computed crops, and the rendered shorts, so a crop that misses the speaker is caught before you see it.
+- **Smart reframing** - Face tracking that follows a moving speaker, stacked split-screen for two-person podcasts, and cursor-following zoom with a blurred backdrop for screen recordings.
+- **Caption review** - Claude fixes mis-heard names and jargon, drops fillers, and marks key words for emphasis, without ever shifting caption timing.
+- **3 caption styles** - Bold (ALL CAPS, yellow highlights), Bounce (bouncy spring, rotating colors), Clean (minimal fade-in). Text stays inside the platforms' UI-safe zones.
+- **Jump cuts** - Optionally removes long pauses, "um"s and the fillers Claude flags, from the video itself. Pauses are measured in the real audio, cuts are click-free, and captions are re-timed to match.
+- **Active-speaker switching** - In two-person shots the crop cuts to whoever is talking (detected from mouth movement), falling back to split-screen when it cannot tell.
+- **Punch-in zoom** - A slight zoom alternates at each jump cut so cuts read as camera changes.
+- **B-roll** - Point it at a folder of your own clips and images; Claude looks at them and places cutaways on the words they illustrate.
+- **Music bed** - Optional background track, looped to length and ducked under speech.
+- **Style profile** - Your usual choices (style, platform, pacing, music, spellings, things to avoid) are saved and reused, so later runs ask fewer questions.
+- **Audio-aware boundary snapping** - Never cuts mid-word or mid-sentence.
+- **Proper loudness** - Two-pass normalisation to -14 LUFS.
+- **Linux and macOS** - CUDA for transcription and NVENC for export when an NVIDIA GPU is present; everything also runs on CPU, including on Macs.
 
 ## Prerequisites
 
-- **FFmpeg** (system package)
+- **FFmpeg**, **jq**
 - **Python 3.10+**
-- **Node.js 18+**
-- **Claude Code** (CLI)
-- **NVIDIA GPU** recommended (for CUDA transcription + NVENC encoding)
+- **Node.js 20+**
+- **Claude Code**
+- **NVIDIA GPU** optional (CUDA transcription + NVENC encoding)
+- **yt-dlp** optional (start from a video URL)
+
+Arch / Omarchy:
+
+```bash
+sudo pacman -S --needed ffmpeg jq python nodejs npm yt-dlp
+# Omarchy users who manage Node with mise can skip nodejs/npm:  mise use -g node@lts
+```
+
+Debian / Ubuntu: `sudo apt install ffmpeg jq python3 python3-venv nodejs npm`
+
+macOS (with [Homebrew](https://brew.sh)):
+
+```bash
+brew install ffmpeg jq node python yt-dlp
+```
+
+On macOS everything runs on the CPU: there is no CUDA, and transcription uses CTranslate2's Apple Accelerate backend. That is comfortable on Apple Silicon; on older Intel Macs use `--model small` for long videos. The scripts are written for the bash 3.2 and BSD tools that ship with macOS, and the CI workflow includes a macOS job.
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/AgriciDaniel/claude-shorts.git
-cd claude-shorts
-
-# Install Python + Node.js dependencies
-bash setup.sh
-
-# Install as a Claude Code skill
+git clone https://github.com/AlanRockefeller/claude-shorts-updated.git
+cd claude-shorts-updated
 bash install.sh
 ```
+
+`install.sh` copies the skill to `~/.claude/skills/shorts/` and runs `setup.sh` there, which:
+
+- Creates a Python venv at `~/.shorts-skill/` (or reuses `~/.video-skill/` if it exists; uses `uv` when installed)
+- Installs `faster-whisper`, `numpy` and `opencv-python-headless`. No PyTorch is needed.
+- On NVIDIA systems, installs the CUDA runtime wheels that CTranslate2 needs (unless system CUDA libraries are already loadable)
+- Runs `npm ci` for the Remotion project and pre-downloads Remotion's headless browser
+
+For development, `bash install.sh --link` symlinks your checkout instead of copying, so edits take effect immediately.
+
+To remove: `bash uninstall.sh` (add `--all` to also delete the venv and cached work files).
 
 ### Windows
 
-claude-shorts requires Unix tools (FFmpeg, bash). On Windows, use [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install):
-
-```bash
-# Inside WSL
-git clone https://github.com/AgriciDaniel/claude-shorts.git
-cd claude-shorts
-bash setup.sh
-bash install.sh
-```
-
-### What `setup.sh` does
-
-- Creates a Python virtual environment at `~/.shorts-skill/` (or reuses `~/.video-skill/` if it exists)
-- Installs `faster-whisper`, `mediapipe`, `numpy`, `opencv-python`, and PyTorch (CUDA or CPU variant)
-- Runs `npm install` in the `remotion/` directory
-- Checks for system dependencies (FFmpeg, jq)
+Use [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install) and follow the Linux steps inside it.
 
 ## Usage
 
-In Claude Code, invoke the skill:
+In Claude Code:
 
 ```
-/shorts
+/shorts ~/Videos/my-talk.mp4
+/shorts https://www.youtube.com/watch?v=...     (needs yt-dlp; only for content you may reuse)
 ```
 
-Then provide your video file when prompted. Claude will:
-
-1. Transcribe the video
-2. Present scored segment candidates
-3. Ask which segments to render, caption style, and target platform
-4. Render and export the final shorts
+See the **[User Guide](docs/GUIDE.md)** for jump cuts, two-person layouts, b-roll, music, the style profile and tuning tips.
 
 ### Example Interaction
 
 ```
 You: /shorts ~/Videos/my-talk.mp4
-Claude: [Transcribes, detects content type, scores segments]
+
+Claude: [Transcribes, looks at the video, scores segments]
 
 | # | Time          | Dur  | Score | Hook                           |
 |---|---------------|------|-------|--------------------------------|
@@ -101,57 +112,57 @@ Claude: [Transcribes, detects content type, scores segments]
 | 3 | 08:11 - 08:52 | 41s  | 79    | "I tested this for 6 months." |
 
 Claude: Which segments? Caption style? Platform?
+
 You: 1 and 3, bounce style, youtube
 
-Claude: [Snaps boundaries, extracts clips, renders, exports]
-Output: shorts/short_01_yt.mp4, shorts/short_03_yt.mp4
+Claude: [Snaps boundaries, reframes, reviews captions, renders, checks frames, exports]
+
+Output: shorts/my-talk/short_01_yt.mp4, short_03_yt.mp4 (+ short_01.md, short_03.md with titles and hashtags)
 ```
+
+### Where files go
+
+| What | Where | Override |
+|------|-------|----------|
+| Finished shorts | `./shorts/<video-name>/` | pass an output dir to the skill |
+| Work files (transcript cache, clips, renders) | `~/.cache/claude-shorts/<video>-<hash>/` | `SHORTS_TMP` |
+| Python venv | `~/.shorts-skill/` | `SHORTS_VENV` |
+| Style profile | `~/.config/claude-shorts/profile.md` | `SHORTS_PROFILE` |
+
+Work files default to `~/.cache` rather than `/tmp` because `/tmp` is a RAM-backed tmpfs on Arch-based systems.
 
 ## Project Structure
 
 ```
 claude-shorts/
-├── SKILL.md                           # 10-step interactive pipeline (Claude Code skill)
-├── CLAUDE.md                          # Project-level instructions
-├── install.sh                         # Install to ~/.claude/skills/
-├── setup.sh                           # Python + Node dependency installer
-│
+├── SKILL.md                    # The interactive pipeline (Claude Code skill)
+├── install.sh / setup.sh       # Install skill + dependencies
 ├── scripts/
-│   ├── transcribe.py                  # faster-whisper GPU transcription
-│   ├── detect_content.py              # MediaPipe content type classifier
-│   ├── compute_reframe.py             # Face tracking + cursor tracking + crop
-│   ├── snap_boundaries.py             # Audio-aware boundary snapping
-│   ├── preflight.sh                   # Input validation + disk space check
-│   ├── detect_gpu.sh                  # NVIDIA NVENC detection
-│   └── export.sh                      # Platform-specific FFmpeg encoding
-│
+│   ├── preflight.sh            # Input/tool validation, work directory allocation
+│   ├── detect_gpu.sh           # CUDA / NVENC capability report
+│   ├── transcribe.py           # faster-whisper → transcript.json + transcript.txt
+│   ├── detect_content.py       # Heuristic content type (face stats)
+│   ├── contact_sheet.py        # Frame grids for Claude's visual checks
+│   ├── snap_boundaries.py      # Sentence- and silence-aware cut points
+│   ├── extract_clips.sh        # Stream-copy clip extraction
+│   ├── jumpcut.py              # Cut long pauses and fillers out of the clips
+│   ├── compute_reframe.py      # Face tracking, speaker switching, split-screen, cursor tracking
+│   ├── active_speaker.py       # Who is talking, from mouth movement
+│   ├── broll.py                # B-roll catalogue and word-anchored timing
+│   ├── add_music.sh            # Music bed with ducking
+│   ├── captions.py             # Per-segment caption tracks + Claude's edits
+│   ├── export.sh               # Platform encodes, two-pass loudnorm
+│   ├── validate.sh             # Output checks
+│   ├── facedet.py              # YuNet face detector wrapper
+│   ├── cuda_libs.py            # Finds/loads the CUDA libraries CTranslate2 needs
+│   └── shorts_common.py, lib.sh
+├── models/                     # YuNet face detection model (232 KB, MIT)
 ├── remotion/
-│   ├── package.json                   # Remotion v4 + React 19 + Zod
-│   ├── render.mjs                     # Bundle-once-render-many orchestrator
-│   ├── remotion.config.ts
-│   └── src/
-│       ├── Root.tsx                   # Composition registry
-│       ├── ShortVideo.tsx             # Main composition
-│       ├── types.ts                   # Zod schemas for props
-│       ├── components/
-│       │   ├── VideoFrame.tsx         # Reframed video with animated crop pan
-│       │   ├── Captions.tsx           # Style dispatcher
-│       │   ├── BoldCaptions.tsx        # Bold ALL CAPS, pop-in spring
-│       │   ├── BounceCaptions.tsx     # Bouncy scale, bright colors
-│       │   ├── CleanCaptions.tsx      # Minimal fade-in
-│       │   ├── HookOverlay.tsx        # First 3.5s hook text
-│       │   └── ProgressBar.tsx        # Bottom progress indicator
-│       ├── hooks/
-│       │   └── useCaptionPages.ts     # @remotion/captions TikTok-style pages
-│       └── styles/
-│           ├── fonts.ts               # @font-face declarations
-│           └── theme.ts               # Color palettes per style
-│
-└── references/
-    ├── scoring-rubric.md              # 5-dimension scoring criteria
-    ├── caption-styles.md              # Visual specs + spring configs
-    ├── platform-specs.md              # YouTube/TikTok/Instagram encoding
-    └── remotion-patterns.md           # Remotion best practices
+│   ├── render.mjs              # Bundle-once-render-many orchestrator
+│   └── src/                    # Composition, layouts, caption styles
+├── docs/GUIDE.md               # User guide for the optional features
+├── references/                 # Scoring rubric, caption/platform specs, Remotion notes
+└── tests/                      # pytest unit tests + synthetic end-to-end smoke test
 ```
 
 ## Caption Styles
@@ -162,46 +173,50 @@ claude-shorts/
 | **Bounce** | Bangers | Bouncy scale 70-120-100%, rotating colors | Entertainment, energy |
 | **Clean** | Inter Bold | Fade-in opacity, white + shadow | Professional, interviews |
 
+## Layouts
+
+| Content Type | Layout | Notes |
+|--------------|--------|-------|
+| **Talking-head** | Full-frame 9:16 crop on the speaker | Static when they sit still, smooth pan when they move |
+| **Podcast** | Both speakers in one crop, cuts to the active speaker, or stacked split-screen | When they are too far apart for one crop: switch if the speaker can be detected, else split (`--podcast-layout`) |
+| **Screen recording** | Zoomed inset over a blurred backdrop | Pans to follow the cursor; `--zoom` sets how much of the screen is shown |
+
 ## Platform Export Specs
 
 | Platform | Codec | Bitrate | Audio |
 |----------|-------|---------|-------|
 | **YouTube Shorts** | H.264 High 4.2 | 12 Mbps | AAC 192k |
-| **TikTok** | H.264 | CRF 18, -preset slow | AAC 128k |
-| **Instagram Reels** | H.264 High 4.2 | 4.5 Mbps (max 5000k) | AAC 128k |
+| **TikTok** | H.264 | CRF 18, max 10 Mbps | AAC 128k |
+| **Instagram Reels** | H.264 High 4.2 | 4.5 Mbps (max 5 Mbps) | AAC 128k |
 
-## Content Type Strategies
+All three accept clips up to 3 minutes; the default candidate length is 20-60 seconds.
 
-| Content Type | Reframe Strategy | Zoom |
-|--------------|-----------------|------|
-| **Talking-head** | Face-tracked center crop (MediaPipe) | 9:16 exact |
-| **Screen recording** | Cursor-tracked pan with moderate zoom | 55% of source width |
-| **Podcast** | Dominant speaker tracking | 9:16 exact |
+## Testing
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+.venv/bin/pytest tests/                               # unit tests (no GPU, model or FFmpeg needed)
+PYTHON=.venv/bin/python bash tests/smoke.sh           # synthetic end-to-end run, everything but the render
+PYTHON=.venv/bin/python bash tests/smoke.sh --render  # ...including Remotion render, music, export and validation
+```
+
+The smoke test generates its own video and transcript, so it does not need a Whisper model.
 
 ## Dependencies
 
 ### Python (installed via `setup.sh`)
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) - GPU-accelerated Whisper
-- [mediapipe](https://mediapipe.dev/) - Face detection for content classification + reframing
-- [numpy](https://numpy.org/) - Array operations for cursor tracking smoothing
-- [opencv-python](https://opencv.org/) - Frame differencing for cursor detection
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) - Whisper on CTranslate2 (CUDA or CPU)
+- [opencv-python-headless](https://opencv.org/) - YuNet face detection, cursor tracking, contact sheets
+- [numpy](https://numpy.org/)
 
 ### Node.js (installed via `setup.sh`)
-- [Remotion v4](https://remotion.dev/) - React-based video rendering
+- [Remotion v4](https://remotion.dev/) - React-based video rendering. Free for individuals and small teams; larger companies need a [company licence](https://www.remotion.dev/license).
 - [@remotion/captions](https://remotion.dev/docs/captions) - TikTok-style word-level captions
-- [React 19](https://react.dev/) - Component framework
-- [Zod](https://zod.dev/) - Runtime type validation for props
+- [React 19](https://react.dev/), [Zod](https://zod.dev/)
 
-### Fonts
-
-Caption fonts are bundled from Google Fonts under the [SIL Open Font License](remotion/public/fonts/OFL.txt):
-- Montserrat Bold (Bold style)
-- Bangers Regular (Bounce style)
-- Inter Bold (Clean style)
-
-### System
-- [FFmpeg](https://ffmpeg.org/) - Audio extraction, segment cutting, export encoding
-- [jq](https://jqlang.github.io/jq/) - JSON processing in shell scripts
+### Bundled assets
+- Caption fonts from Google Fonts under the [SIL Open Font License](remotion/public/fonts/OFL.txt): Montserrat Bold, Bangers, Inter Bold
+- [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) face detection model, [MIT](models/LICENSE-yunet.txt)
 
 ## How Segment Scoring Works
 
@@ -217,18 +232,13 @@ Claude scores each candidate on 5 weighted dimensions:
 
 Final score = weighted sum, scale 0-100. Minimum threshold: 60.
 
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/AgriciDaniel/claude-shorts/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/AgriciDaniel/claude-shorts/discussions)
-
 ## License
 
 [MIT](LICENSE)
 
 ---
 
-## Author
+## Original Author
 
 Built by [Agrici Daniel](https://agricidaniel.com/about) - AI Workflow Architect.
 

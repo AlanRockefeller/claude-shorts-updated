@@ -8,7 +8,7 @@ Encoding specs for each target platform, optimized for quality and upload compat
 |----------|-------|
 | Resolution | 1080x1920 |
 | Aspect Ratio | 9:16 |
-| Max Duration | 60 seconds |
+| Max Duration | 3 minutes |
 | Video Codec | H.264 (AVC) |
 | Profile | High |
 | Level | 4.2 |
@@ -52,7 +52,7 @@ ffmpeg -y -i input.mp4 \
 |----------|-------|
 | Resolution | 1080x1920 |
 | Aspect Ratio | 9:16 |
-| Max Duration | 60 seconds (3 min with account) |
+| Max Duration | 10 minutes (varies by account and region) |
 | Video Codec | H.264 (AVC) |
 | Bitrate Mode | CRF 18 (quality-based) |
 | Max Bitrate | 10 Mbps |
@@ -92,7 +92,7 @@ ffmpeg -y -i input.mp4 \
 |----------|-------|
 | Resolution | 1080x1920 |
 | Aspect Ratio | 9:16 |
-| Max Duration | 90 seconds |
+| Max Duration | 3 minutes or more (varies by account) |
 | Video Codec | H.264 (AVC) |
 | Profile | High |
 | Level | 4.2 |
@@ -130,14 +130,24 @@ All platforms have UI overlays that consume screen space. Values below are the m
 | Right | 120px | 150px | 100px | 150px |
 | Safe Area | 900x1450px | 870x1420px | 940x1370px | 870x1260px |
 
-Caption position at 350px from bottom clears TikTok (320px) and Instagram (340px). For YouTube Shorts safety, 400px+ is recommended. For universal cross-platform safety, 450px+ is ideal.
+The renderer uses a single universal layout (`remotion/src/styles/layout.ts`): hook text starts 220px from the top, captions sit 440px above the bottom edge and stay 110px clear of the right-hand button column.
+
+## Clip Length
+
+All three platforms accept vertical clips of at least 3 minutes, so the pipeline allows up to 180 seconds (`snap_boundaries.py --max-duration`, `validate.sh --max-duration`). Limits change and vary by account; check the app if a longer upload is rejected. Shorter still tends to perform better: the default candidate length is 20-60 seconds.
 
 ## Audio Normalization
 
-All exports normalize audio to -14 LUFS (EBU R128) using FFmpeg's `loudnorm` filter:
+All exports normalize audio to -14 LUFS (EBU R128) using FFmpeg's `loudnorm` filter in two passes:
+
+1. **Measure** the rendered short: `loudnorm=I=-14:TP=-1:LRA=11:print_format=json`
+2. **Apply** with the measured values and `linear=true`, so the whole clip gets one constant gain instead of the pumping that single-pass (dynamic) mode can cause
+
 - `I=-14` — integrated loudness target (-14 LUFS, YouTube/streaming standard)
 - `TP=-1` — true peak max (-1 dBFS headroom, prevents clipping)
 - `LRA=11` — loudness range (dynamic variation allowed)
+
+The FFmpeg commands above show the single-pass form for brevity; `export.sh` substitutes the measured two-pass filter.
 
 ## NVENC Encoding Notes
 
@@ -146,4 +156,4 @@ For NVIDIA GPUs with NVENC support (GTX 1650+, RTX series):
 - 5-10x faster than CPU `-preset slow`
 - Quality is comparable to CPU at same bitrate
 - `-preset p7` for maximum quality (slower but still faster than CPU)
-- Always verify NVENC availability: `ffmpeg -encoders | grep nvenc`
+- `export.sh` runs a tiny test encode to confirm NVENC really works (an encoder being listed is not enough) and falls back to libx264 if a GPU encode fails; `--cpu` forces CPU encoding

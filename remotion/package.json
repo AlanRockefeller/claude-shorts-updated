@@ -1,23 +1,27 @@
 {
   "name": "claude-shorts-remotion",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
-    "preview": "remotion preview src/index.ts",
-    "render": "node render.mjs"
+    "preview": "remotion studio src/index.ts",
+    "render": "node render.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@remotion/bundler": "^4.0.422",
-    "@remotion/captions": "^4.0.422",
-    "@remotion/cli": "^4.0.422",
-    "@remotion/renderer": "^4.0.422",
+    "@remotion/bundler": "4.0.542",
+    "@remotion/captions": "4.0.542",
+    "@remotion/cli": "4.0.542",
+    "@remotion/renderer": "4.0.542",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "remotion": "^4.0.422",
+    "remotion": "4.0.542",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

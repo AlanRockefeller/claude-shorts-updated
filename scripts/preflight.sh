@@ -1,123 +1,173 @@
 #!/usr/bin/env bash
-# Pre-flight safety check before shortform pipeline
+# Pre-flight check before the shorts pipeline. Also allocates the per-video
+# work directory, so stale files from an earlier run are never picked up.
+#
 # Usage: bash scripts/preflight.sh <input_file> [output_dir]
-# Output: JSON with pass/fail status and any warnings
-set -euo pipefail
+# Output: JSON with pass/fail, video info, work_dir, output_dir, warnings
+#
+# Portability: these scripts must run on macOS's bash 3.2 with BSD tools as
+# well as Linux. Empty arrays are expanded as ${arr[@]+"${arr[@]}"} because
+# bash 3.2 treats "${arr[@]}" of an empty array as unset under `set -u`.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/lib.sh
+source "$SCRIPT_DIR/lib.sh"
 
 INPUT="${1:-}"
-OUTPUT_DIR="${2:-./shorts}"
+OUTPUT_BASE="${2:-./shorts}"
 
+if ! command -v jq &>/dev/null; then
+    echo "{\"pass\":false,\"errors\":[\"jq not found — $(shorts_install_hint jq)\"]}"
+    exit 1
+fi
 if [ -z "$INPUT" ]; then
-    echo '{"pass":false,"error":"Usage: preflight.sh <input_file> [output_dir]"}'
+    jq -n '{pass:false, errors:["Usage: preflight.sh <input_file> [output_dir]"]}'
     exit 1
 fi
 
 WARNINGS=()
 ERRORS=()
 
-# Check input exists
+# --- Tools -------------------------------------------------------------------
+HAVE_FFMPEG=true
+for tool in ffmpeg ffprobe; do
+    if ! command -v "$tool" &>/dev/null; then
+        ERRORS+=("$tool not found — $(shorts_install_hint ffmpeg)")
+        HAVE_FFMPEG=false
+    fi
+done
+
+if ! command -v node &>/dev/null; then
+    ERRORS+=("Node.js not found — $(shorts_install_hint nodejs npm)")
+else
+    NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+    if [ "$NODE_MAJOR" -lt 20 ]; then
+        WARNINGS+=("Node.js $NODE_MAJOR is end-of-life; Node 20 or newer is recommended")
+    fi
+fi
+
+VENV="$(shorts_venv)"
+if [ -z "$VENV" ]; then
+    ERRORS+=("Python venv not found — run: bash $ROOT_DIR/setup.sh")
+else
+    MISSING_PY="$("$VENV/bin/python3" -c 'import importlib.util as u; print(" ".join(m for m in ("faster_whisper", "cv2", "numpy") if u.find_spec(m) is None))' 2>/dev/null)"
+    if [ -n "$MISSING_PY" ]; then
+        ERRORS+=("Missing Python packages in $VENV: $MISSING_PY — run: bash $ROOT_DIR/setup.sh")
+    fi
+fi
+
+if [ ! -d "$ROOT_DIR/remotion/node_modules/remotion" ]; then
+    ERRORS+=("Remotion dependencies not installed — run: (cd $ROOT_DIR/remotion && npm ci)")
+fi
+if [ ! -f "$ROOT_DIR/models/face_detection_yunet_2023mar.onnx" ]; then
+    ERRORS+=("Face detection model missing from $ROOT_DIR/models — re-run install.sh")
+fi
+
+# --- Input -------------------------------------------------------------------
+PROBE='{}'
 if [ ! -f "$INPUT" ]; then
     ERRORS+=("Input file not found: $INPUT")
+elif [ "$HAVE_FFMPEG" = true ]; then
+    # ffprobe prints an empty JSON object before failing on a non-media file,
+    # so do not append a fallback to its output: replace it.
+    PROBE="$(ffprobe -v error -print_format json -show_format -show_streams "$INPUT" 2>/dev/null)" || PROBE='{}'
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$PROBE" || PROBE='{}'
+    if [ "$(jq '[.streams[]? | select(.codec_type=="video" and (.disposition.attached_pic // 0) == 0)] | length' <<<"$PROBE")" -eq 0 ]; then
+        ERRORS+=("Input has no video stream: $INPUT")
+    fi
+    if [ "$(jq '[.streams[]? | select(.codec_type=="audio")] | length' <<<"$PROBE")" -eq 0 ]; then
+        ERRORS+=("Input has no audio stream — there is nothing to transcribe")
+    fi
+    TRANSFER="$(jq -r '[.streams[]? | select(.codec_type=="video")][0].color_transfer // ""' <<<"$PROBE")"
+    if [ "$TRANSFER" = "smpte2084" ] || [ "$TRANSFER" = "arib-std-b67" ]; then
+        WARNINGS+=("Source is HDR ($TRANSFER); colours may look washed out in the SDR output")
+    fi
+    DUR_INT="$(jq -r '(.format.duration // "0") | tonumber | floor' <<<"$PROBE")"
+    if [ "$DUR_INT" -gt 0 ] && [ "$DUR_INT" -lt 30 ]; then
+        WARNINGS+=("Video is only ${DUR_INT}s long — there may not be enough material for a short")
+    fi
 fi
 
-# Check input is a video file (via ffprobe)
+# --- Work + output directories -------------------------------------------------
+WORK_DIR=""
+OUTPUT_DIR="$OUTPUT_BASE"
+CACHED_TRANSCRIPT=false
 if [ -f "$INPUT" ]; then
-    if ! ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 "$INPUT" 2>/dev/null | grep -q "video"; then
-        ERRORS+=("Input is not a valid video file: $INPUT")
+    ABS_INPUT="$(shorts_abspath "$INPUT")"
+    SIZE="$(shorts_file_size "$ABS_INPUT")"
+    MTIME="$(shorts_file_mtime "$ABS_INPUT")"
+    HASH="$(shorts_hash8 "$ABS_INPUT|$SIZE|$MTIME")"
+    SLUG="$(basename "${ABS_INPUT%.*}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40)"
+    [ -n "$SLUG" ] || SLUG="video"
+
+    WORK_DIR="$(shorts_tmp_root)/$SLUG-$HASH"
+    OUTPUT_DIR="${OUTPUT_BASE%/}/$SLUG"
+
+    if mkdir -p "$WORK_DIR/clips" "$WORK_DIR/render" "$WORK_DIR/qa" 2>/dev/null; then
+        [ -f "$WORK_DIR/transcript.json" ] && CACHED_TRANSCRIPT=true
+        # Rough need: the source's size again for clips, renders and exports.
+        INPUT_KB=$((SIZE / 1024))
+        NEEDED_KB=$((INPUT_KB / 2 + 512000))
+        AVAIL_KB="$(df -Pk "$WORK_DIR" 2>/dev/null | awk 'NR==2 {print $4}')"
+        if [ -n "$AVAIL_KB" ] && [ "$AVAIL_KB" -lt "$NEEDED_KB" ]; then
+            WARNINGS+=("Low disk space for $WORK_DIR: $((AVAIL_KB / 1024)) MB free, ~$((NEEDED_KB / 1024)) MB recommended (set SHORTS_TMP to move it)")
+        fi
+    else
+        ERRORS+=("Cannot create work directory: $WORK_DIR (set SHORTS_TMP to a writable location)")
+    fi
+
+    if [ -d "$OUTPUT_DIR" ]; then
+        EXISTING="$(find "$OUTPUT_DIR" -maxdepth 1 -name 'short_*.mp4' 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "$EXISTING" -gt 0 ]; then
+            WARNINGS+=("Output directory $OUTPUT_DIR already has $EXISTING short_*.mp4 files (same-named exports are replaced when re-rendered)")
+        fi
     fi
 fi
 
-# Check output directory
-if [ -d "$OUTPUT_DIR" ]; then
-    EXISTING=$(find "$OUTPUT_DIR" -name "short_*.mp4" 2>/dev/null | wc -l)
-    if [ "$EXISTING" -gt 0 ]; then
-        WARNINGS+=("Output directory has $EXISTING existing short_*.mp4 files")
-    fi
-fi
-
-# Check disk space (estimate 3x input size for temp + output)
-if [ -f "$INPUT" ]; then
-    INPUT_SIZE_KB=$(du -k "$INPUT" | cut -f1)
-    NEEDED_KB=$((INPUT_SIZE_KB * 3))
-    AVAIL_KB=$(df -k /tmp 2>/dev/null | tail -1 | awk '{print $4}')
-    if [ -n "$AVAIL_KB" ] && [ "$AVAIL_KB" -lt "$NEEDED_KB" ]; then
-        WARNINGS+=("Low disk space on /tmp: ${AVAIL_KB}KB available, estimated ${NEEDED_KB}KB needed")
-    fi
-fi
-
-# Check FFmpeg
-if ! command -v ffmpeg &>/dev/null; then
-    ERRORS+=("ffmpeg not found — install with: sudo apt install ffmpeg")
-fi
-
-# Check ffprobe
-if ! command -v ffprobe &>/dev/null; then
-    ERRORS+=("ffprobe not found — install with: sudo apt install ffmpeg")
-fi
-
-# Check Node.js
-if ! command -v node &>/dev/null; then
-    ERRORS+=("Node.js not found — install with: nvm install 18")
-fi
-
-# Check Python venv
-VENV=""
-if [ -d "$HOME/.video-skill" ]; then
-    VENV="$HOME/.video-skill"
-elif [ -d "$HOME/.shorts-skill" ]; then
-    VENV="$HOME/.shorts-skill"
-fi
-
-if [ -z "$VENV" ]; then
-    ERRORS+=("Python venv not found — run: bash setup.sh")
-else
-    # Check faster-whisper is installed
-    if ! "$VENV/bin/python3" -c "import faster_whisper" 2>/dev/null; then
-        ERRORS+=("faster-whisper not installed in $VENV — run: bash setup.sh")
-    fi
-fi
-
-# Check Remotion node_modules
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ ! -d "$SCRIPT_DIR/remotion/node_modules" ]; then
-    ERRORS+=("Remotion dependencies not installed — run: bash setup.sh")
-fi
-
-# Get video info
-DURATION=""
-RESOLUTION=""
-if [ -f "$INPUT" ] && command -v ffprobe &>/dev/null; then
-    DURATION=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 "$INPUT" 2>/dev/null || echo "")
-    RESOLUTION=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$INPUT" 2>/dev/null || echo "")
-fi
-
-# Build JSON output
-PASS="true"
-if [ ${#ERRORS[@]} -gt 0 ]; then
-    PASS="false"
-fi
-
-ERROR_JSON="[]"
-if [ ${#ERRORS[@]} -gt 0 ]; then
-    ERROR_JSON=$(printf '%s\n' "${ERRORS[@]}" | jq -R . | jq -s .)
-fi
-
-WARN_JSON="[]"
-if [ ${#WARNINGS[@]} -gt 0 ]; then
-    WARN_JSON=$(printf '%s\n' "${WARNINGS[@]}" | jq -R . | jq -s .)
-fi
-
-cat <<EOF
-{
-  "pass": $PASS,
-  "input": "$INPUT",
-  "output_dir": "$OUTPUT_DIR",
-  "duration": ${DURATION:-null},
-  "resolution": "${RESOLUTION:-unknown}",
-  "venv": "${VENV:-none}",
-  "errors": $ERROR_JSON,
-  "warnings": $WARN_JSON
+to_json_array() {
+    if [ "$#" -eq 0 ]; then echo '[]'; else printf '%s\n' "$@" | jq -R . | jq -s .; fi
 }
-EOF
 
-[ "$PASS" = "true" ] && exit 0 || exit 1
+PASS=true
+[ ${#ERRORS[@]} -gt 0 ] && PASS=false
+
+jq -n \
+    --argjson pass "$PASS" \
+    --arg input "$INPUT" \
+    --arg work_dir "$WORK_DIR" \
+    --arg output_dir "$OUTPUT_DIR" \
+    --arg venv "${VENV:-}" \
+    --arg root "$ROOT_DIR" \
+    --argjson cached "$CACHED_TRANSCRIPT" \
+    --arg profile "$(shorts_profile_path)" \
+    --argjson profile_exists "$([ -f "$(shorts_profile_path)" ] && echo true || echo false)" \
+    --argjson has_ytdlp "$(command -v yt-dlp &>/dev/null && echo true || echo false)" \
+    --argjson probe "$PROBE" \
+    --argjson errors "$(to_json_array ${ERRORS[@]+"${ERRORS[@]}"})" \
+    --argjson warnings "$(to_json_array ${WARNINGS[@]+"${WARNINGS[@]}"})" \
+    '($probe.streams // []) as $s
+     | ([$s[] | select(.codec_type=="video")][0] // {}) as $v
+     | ([$s[] | select(.codec_type=="audio")][0] // {}) as $a
+     | {
+        pass: $pass,
+        input: $input,
+        skill_root: $root,
+        work_dir: $work_dir,
+        output_dir: $output_dir,
+        venv: $venv,
+        transcript_cached: $cached,
+        duration: (($probe.format.duration // null) | if . then (tonumber | . * 10 | round / 10) else null end),
+        resolution: (if $v.width then "\($v.width)x\($v.height)" else null end),
+        fps: ($v.avg_frame_rate // null),
+        video_codec: ($v.codec_name // null),
+        audio_codec: ($a.codec_name // null),
+        yt_dlp_available: $has_ytdlp,
+        profile: $profile,
+        profile_exists: $profile_exists,
+        errors: $errors,
+        warnings: $warnings
+      }'
+
+[ "$PASS" = "true" ]

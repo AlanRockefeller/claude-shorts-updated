@@ -20,7 +20,7 @@ Use [GitHub Discussions](https://github.com/AgriciDaniel/claude-shorts/discussio
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Make your changes
-4. Test with a short video clip (under 5 minutes) before submitting
+4. Run `pytest tests/` and `bash tests/smoke.sh --render`, and try a real video (under 5 minutes is fine)
 5. Submit a PR with a clear description of what changed and why
 
 ### Development Setup
@@ -28,13 +28,12 @@ Use [GitHub Discussions](https://github.com/AgriciDaniel/claude-shorts/discussio
 ```bash
 git clone https://github.com/YOUR_USERNAME/claude-shorts.git
 cd claude-shorts
-bash setup.sh
-bash install.sh
+bash install.sh --link   # symlink the checkout as the skill and install dependencies
 ```
 
 ### Guidelines
 
 - All Python scripts should output JSON for Claude Code to parse
-- Shell scripts should use `set -euo pipefail` for safety
+- Shell scripts should build JSON with `jq` and pass `shellcheck`
 - Test both GPU and CPU code paths when possible
 - Keep dependencies minimal — don't add packages for single-use operations

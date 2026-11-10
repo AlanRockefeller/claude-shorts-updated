@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Pull requests from branches of this repository are already covered by the push event.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: remotion/package-lock.json
+
+      - name: System packages (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq shellcheck
+
+      - name: System packages (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg jq
+
+      - name: Tool versions
+        run: |
+          /bin/bash --version | head -1
+          ffmpeg -version | head -1
+          python3 --version
+          node --version
+
+      - name: Python packages
+        run: pip install -r requirements.txt pytest
+
+      - name: Shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck -x -S warning scripts/*.sh setup.sh install.sh uninstall.sh tests/smoke.sh
+
+      - name: Unit tests
+        run: pytest tests/ -q
+
+      - name: Remotion typecheck
+        working-directory: remotion
+        run: npm ci --no-audit --no-fund && npm run typecheck
+
+      # /bin/bash is 3.2 on macOS, which is what users get there.
+      - name: Pipeline smoke test (synthetic video, with jump cuts)
+        run: PYTHON=python3 /bin/bash tests/smoke.sh
+
+      - name: Pipeline smoke test with Remotion render and export
+        run: PYTHON=python3 /bin/bash tests/smoke.sh --render

@@ -4,15 +4,14 @@
 
 export const BOLD_THEME = {
   textColor: "#FFFFFF",
-  activeColor: "#FFD700", // Yellow highlight on active word
+  activeColor: "#FFD700", // Yellow highlight on the word being spoken
+  emphasisColor: "#3DFF7A", // Key words picked during caption review
   shadowColor: "#000000",
-  backgroundColor: "transparent",
 };
 
 export const BOUNCE_THEME = {
   textColor: "#FFFFFF",
   shadowColor: "#000000",
-  backgroundColor: "transparent",
   // Rotating bright colors per page
   rotatingColors: [
     "#00FFFF", // Cyan
@@ -25,8 +24,8 @@ export const BOUNCE_THEME = {
 };
 
 export const CLEAN_THEME = {
-  textColor: "#FFFFFF",
-  activeColor: "#E0E0E0", // Subtle lighter white for active word
-  shadowColor: "rgba(0, 0, 0, 0.6)",
-  backgroundColor: "transparent",
+  textColor: "rgba(255, 255, 255, 0.72)", // Words not currently spoken
+  activeColor: "#FFFFFF",
+  emphasisColor: "#FFD84D",
+  shadowColor: "rgba(0, 0, 0, 0.7)",
 };
