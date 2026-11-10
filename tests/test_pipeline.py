@@ -414,3 +414,23 @@ def test_broll_is_anchored_to_words_through_jump_cuts(tmp_path):
 
     missing, problem = broll.resolve_item({"file": "nope.mp4", "from_word": 4}, seg, index, str(tmp_path))
     assert missing is None and "not found" in problem
+
+
+def test_stretched_word_keeps_its_caption_after_a_pause_is_cut(tmp_path, capsys):
+    from shorts_common import retime_span
+
+    # Whisper gave the word 0.2-3.0 s, but only 0.2-0.8 is speech; the pause was cut.
+    keep = [[0.0, 0.8], [3.1, 4.0]]
+    assert retime_span(0.2, 3.0, keep) == pytest.approx((0.2, 0.8))
+    assert retime_span(1.0, 2.9, keep) is None            # entirely inside the cut
+    assert retime_span(3.2, 3.6, keep) == pytest.approx((0.9, 1.3))
+
+    words = transcribe.clean_word_times([
+        {"text": " Wait", "start": 10.2, "end": 13.0, "prob": 0.9},
+        {"text": " what?", "start": 13.2, "end": 13.6, "prob": 0.9},
+    ])
+    seg = {"id": 1, "start": 10.0, "end": 14.0, "keep": keep, "render_duration": 1.7}
+    caps = run_apply(tmp_path, words, seg)
+    assert [c["text"] for c in caps] == [" Wait", " what?"]
+    assert caps[0]["startMs"] == 200 and caps[0]["endMs"] == 800
+    assert caps[1]["startMs"] == 900

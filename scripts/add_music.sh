@@ -34,6 +34,7 @@ if [ -z "$INPUT_DIR" ] || [ ! -d "$INPUT_DIR" ]; then
     jq -n '{error:"Usage: add_music.sh --input-dir DIR --music FILE [--volume -20] [--duck 8] [--start 0] [--only 2,5] [--remove]"}'; exit 1
 fi
 ORIG_DIR="$INPUT_DIR/nomusic"
+MIX_TAG="claude-shorts-music-bed"   # marks files this script produced
 
 if [ "$REMOVE" = "true" ]; then
     RESTORED=0
@@ -67,9 +68,16 @@ for current in "$INPUT_DIR"/short_*.mp4; do
     fi
 
     # Always mix from the music-free original so re-runs do not stack music.
+    # Our own output carries a metadata tag; anything without it is a fresh
+    # render and becomes the new original.
     original="$ORIG_DIR/$name"
-    if [ ! -f "$original" ] || [ "$current" -nt "$original" ]; then
+    tag="$(ffprobe -v error -show_entries format_tags=comment -of csv=p=0 "$current" 2>/dev/null)"
+    if [ "$tag" != "$MIX_TAG" ]; then
         cp -f "$current" "$original"
+    elif [ ! -f "$original" ]; then
+        RESULTS="$(jq -c --arg file "$name" '. + [{file:$file, status:"failed", error:"already has music and the music-free original is missing; re-render it"}]' <<<"$RESULTS")"
+        FAILED=$((FAILED + 1))
+        continue
     fi
 
     duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$original" 2>/dev/null)"
@@ -87,7 +95,8 @@ for current in "$INPUT_DIR"/short_*.mp4; do
     if ffmpeg -nostdin -y -hide_banner -nostats -loglevel error \
             -i "$original" -stream_loop -1 -ss "$START" -i "$MUSIC" \
             -filter_complex "$filter" -map 0:v:0 -map "[mix]" \
-            -c:v copy -c:a aac -b:a 320k -t "$duration" -movflags +faststart "$tmp" 2>"$INPUT_DIR/.music.log"; then
+            -c:v copy -c:a aac -b:a 320k -t "$duration" -metadata comment="$MIX_TAG" \
+            -movflags +faststart "$tmp" 2>"$INPUT_DIR/.music.log"; then
         mv -f "$tmp" "$current"
     else
         rm -f "$tmp"; cp -f "$original" "$current"

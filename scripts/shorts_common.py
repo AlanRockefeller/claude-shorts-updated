@@ -169,3 +169,28 @@ def retime(t, keep):
             return offset + (t - start), True
         offset += end - start
     return offset, False
+
+
+def retime_span(start, end, keep, min_overlap=0.04):
+    """Map an interval onto the timeline after jump cuts.
+
+    Returns (new_start, new_end) covering the part of [start, end] that
+    survives, or None if less than `min_overlap` seconds of it is kept. Judging
+    by overlap (not by the midpoint) matters because Whisper often stretches a
+    word's end across the pause that follows it: the word is still spoken even
+    though most of its nominal interval was cut.
+    """
+    offset = 0.0
+    new_start = new_end = None
+    overlap = 0.0
+    for k_start, k_end in keep:
+        lo, hi = max(start, k_start), min(end, k_end)
+        if hi > lo:
+            if new_start is None:
+                new_start = offset + (lo - k_start)
+            new_end = offset + (hi - k_start)
+            overlap += hi - lo
+        offset += k_end - k_start
+    if new_start is None or overlap < min_overlap:
+        return None
+    return new_start, new_end

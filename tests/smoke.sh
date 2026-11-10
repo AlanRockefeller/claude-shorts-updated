@@ -136,6 +136,16 @@ if [ "$RENDER" = true ]; then
     bash "$ROOT/scripts/add_music.sh" --input-dir "$WORK/render" --music "$TMP/music.wav" \
         --volume -12 | jq -e '.failed == 0 and (.files | length == 1)' >/dev/null
     [ -f "$WORK/render/nomusic/short_02.mp4" ]
+    # Running it again must mix from the music-free original, not stack music,
+    # and --remove must bring back exactly that original.
+    cp "$WORK/render/nomusic/short_02.mp4" "$TMP/original.mp4"
+    bash "$ROOT/scripts/add_music.sh" --input-dir "$WORK/render" --music "$TMP/music.wav" \
+        --volume -18 | jq -e '.failed == 0' >/dev/null
+    cmp -s "$TMP/original.mp4" "$WORK/render/nomusic/short_02.mp4"
+    bash "$ROOT/scripts/add_music.sh" --input-dir "$WORK/render" --remove >/dev/null
+    cmp -s "$TMP/original.mp4" "$WORK/render/short_02.mp4"
+    bash "$ROOT/scripts/add_music.sh" --input-dir "$WORK/render" --music "$TMP/music.wav" \
+        --volume -12 | jq -e '.failed == 0' >/dev/null
     # Video untouched, audio still the same length as the picture.
     ffprobe -v error -show_entries stream=duration -of json "$WORK/render/short_02.mp4" \
         | jq -e '[.streams[].duration | tonumber] | (max - min < 0.1)' >/dev/null
