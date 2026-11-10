@@ -7,6 +7,19 @@ updates:
     labels:
       - "dependencies"
     open-pull-requests-limit: 5
+  - package-ecosystem: "npm"
+    directory: "/remotion"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 5
+    groups:
+      # All remotion packages must be upgraded together to the same version.
+      remotion:
+        patterns:
+          - "remotion"
+          - "@remotion/*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

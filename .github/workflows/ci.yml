@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: remotion/package-lock.json
+
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq shellcheck
+
+      - name: Python packages
+        run: pip install -r requirements.txt pytest
+
+      - name: Shellcheck
+        run: shellcheck -x -S warning scripts/*.sh setup.sh install.sh uninstall.sh tests/smoke.sh
+
+      - name: Unit tests
+        run: pytest tests/ -q
+
+      - name: Remotion typecheck
+        working-directory: remotion
+        run: npm ci --no-audit --no-fund && npm run typecheck
+
+      - name: Pipeline smoke test (synthetic video, no render)
+        run: PYTHON=python3 bash tests/smoke.sh

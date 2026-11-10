@@ -1,47 +1,66 @@
 #!/usr/bin/env bash
-# Install claude-shorts skill to ~/.claude/skills/
+# Install the shorts skill into ~/.claude/skills/shorts and set up its
+# dependencies there.
+#
+# Usage:
+#   bash install.sh           Copy the skill and install dependencies
+#   bash install.sh --link    Symlink this checkout instead (for development:
+#                             edits take effect immediately)
+#   bash install.sh --no-setup   Copy/link only; skip dependency setup
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_DIR="$HOME/.claude/skills/shorts"
+SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
+SKILL_DIR="$SKILLS_DIR/shorts"
+
+MODE="copy"
+RUN_SETUP="true"
+for arg in "$@"; do
+    case "$arg" in
+        --link) MODE="link" ;;
+        --no-setup) RUN_SETUP="false" ;;
+        -h|--help) sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "Unknown option: $arg" >&2; exit 1 ;;
+    esac
+done
 
 echo "=== Installing shorts skill ==="
+mkdir -p "$SKILLS_DIR"
 
-# Create skill directory
-mkdir -p "$SKILL_DIR"
-mkdir -p "$SKILL_DIR/scripts"
-mkdir -p "$SKILL_DIR/references"
-mkdir -p "$SKILL_DIR/remotion"
+if [ "$MODE" = "link" ]; then
+    if [ -e "$SKILL_DIR" ] && [ ! -L "$SKILL_DIR" ]; then
+        echo "Replacing existing copy at $SKILL_DIR with a symlink"
+        rm -rf "$SKILL_DIR"
+    fi
+    ln -sfn "$SCRIPT_DIR" "$SKILL_DIR"
+    echo "Linked: $SKILL_DIR -> $SCRIPT_DIR"
+else
+    if [ -L "$SKILL_DIR" ]; then
+        rm -f "$SKILL_DIR"
+    fi
+    mkdir -p "$SKILL_DIR"
+    # Replace code directories wholesale so files removed upstream don't linger,
+    # but keep remotion/node_modules to make re-installs fast.
+    rm -rf "$SKILL_DIR/scripts" "$SKILL_DIR/references" "$SKILL_DIR/models" \
+           "$SKILL_DIR/remotion/src" "$SKILL_DIR/remotion/public"
 
-# Copy SKILL.md (the skill definition)
-cp "$SCRIPT_DIR/SKILL.md" "$SKILL_DIR/SKILL.md"
+    cp "$SCRIPT_DIR/SKILL.md" "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/requirements.txt" \
+       "$SCRIPT_DIR/LICENSE" "$SKILL_DIR/"
+    cp -R "$SCRIPT_DIR/scripts" "$SCRIPT_DIR/references" "$SCRIPT_DIR/models" "$SKILL_DIR/"
+    rm -rf "$SKILL_DIR/scripts/__pycache__"
+    chmod +x "$SKILL_DIR"/scripts/*.sh "$SKILL_DIR"/scripts/*.py 2>/dev/null || true
 
-# Copy scripts
-for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/*.py; do
-    [ -f "$f" ] && cp "$f" "$SKILL_DIR/scripts/"
-done
+    tar -C "$SCRIPT_DIR" --exclude='node_modules' --exclude='.remotion' -cf - remotion \
+        | tar -C "$SKILL_DIR" -xf -
+    echo "Copied to: $SKILL_DIR"
+fi
 
-# Make scripts executable
-chmod +x "$SKILL_DIR"/scripts/*.sh 2>/dev/null || true
-chmod +x "$SKILL_DIR"/scripts/*.py 2>/dev/null || true
-
-# Copy references
-for f in "$SCRIPT_DIR"/references/*.md; do
-    [ -f "$f" ] && cp "$f" "$SKILL_DIR/references/"
-done
-
-# Copy Remotion project (excluding node_modules)
-rsync -a --exclude='node_modules' --exclude='.remotion' \
-    "$SCRIPT_DIR/remotion/" "$SKILL_DIR/remotion/"
+if [ "$RUN_SETUP" = "true" ]; then
+    echo ""
+    # Dependencies must live next to the installed skill (remotion/node_modules),
+    # so run setup from the installed location.
+    SHORTS_FROM_INSTALL=1 bash "$SKILL_DIR/setup.sh"
+fi
 
 echo ""
-echo "Installed to: $SKILL_DIR"
-echo ""
-echo "Files copied:"
-find "$SKILL_DIR" -type f | sort | while read -r f; do
-    echo "  ${f#$SKILL_DIR/}"
-done
-echo ""
-echo "Next steps:"
-echo "  1. Run 'bash setup.sh' to install dependencies (if not done)"
-echo "  2. Use /shorts in Claude Code to start the interactive pipeline"
+echo "Installed. Use /shorts <video file or URL> in Claude Code."

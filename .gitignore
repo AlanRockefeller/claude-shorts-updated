@@ -40,3 +40,8 @@ Thumbs.db
 # Temporary / intermediate files
 *.wav
 *.tmp
+
+# Test / tool caches
+.pytest_cache/
+.ruff_cache/
+*.partial.mp4

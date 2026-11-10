@@ -1,6 +1,6 @@
 # Remotion Patterns and Best Practices
 
-Key patterns used in claude-shorts, verified against Remotion v4.0.422.
+Key patterns used in claude-shorts, verified against Remotion v4.0.542. All `remotion` and `@remotion/*` packages are pinned to the same exact version; upgrade them together.
 
 ## Bundle-Once-Render-Many
 
@@ -30,7 +30,9 @@ try {
       composition,
       serveUrl,
       codec: "h264",
-      crf: 18,
+      crf: 16,
+      jpegQuality: 92,
+      colorSpace: "bt709",
       outputLocation: segment.outputPath,
       inputProps: segment.props,
       puppeteerInstance: browser,
@@ -80,7 +82,7 @@ spring({ frame, fps, config: { mass: 1, damping: 8, stiffness: 180 } });
 // ~0.6s settle, overshoots to ~1.2
 
 // Clean style uses interpolate(), not spring
-interpolate(localFrame, [0, 6], [0, 1], { extrapolateRight: "clamp" });
+interpolate(pageFrame, [0, fps / 5], [0, 1], { extrapolateRight: "clamp" });
 ```
 
 Spring values guide:
@@ -138,8 +140,9 @@ Each segment has a different duration. Use `calculateMetadata` in the Compositio
   schema={ShortVideoPropsSchema}
   defaultProps={defaultProps}
   calculateMetadata={({ props }) => ({
-    durationInFrames: Math.ceil(props.durationInSeconds * 30),
-    fps: 30,
+    // fps follows the source clip (render.mjs passes it in), capped at 60
+    durationInFrames: Math.max(1, Math.round(props.durationInSeconds * props.fps)),
+    fps: props.fps,
     width: 1080,
     height: 1920,
   })}
@@ -157,13 +160,16 @@ const ShortVideoPropsSchema = z.object({
   clipSrc: z.string(),
   sourceWidth: z.number(),
   sourceHeight: z.number(),
+  layout: z.enum(["fill", "framed", "split"]).optional().default("fill"),
   crop: CropSchema,
-  captions: z.array(CaptionSchema),
+  panels: z.array(PanelSchema).optional().default([]),   // split layout
+  captions: z.array(CaptionSchema),                      // {text, startMs, endMs, emphasis?}
   captionStyle: z.enum(["bold", "bounce", "clean"]),
   hookLine1: z.string().optional().default(""),
   hookLine2: z.string().optional().default(""),
   showProgressBar: z.boolean().optional().default(true),
   durationInSeconds: z.number(),
+  fps: z.number().optional().default(30),
 });
 ```
 
@@ -175,6 +181,22 @@ When rendering headless, `clipSrc` must be an `http://` URL. Remotion's renderer
 
 - Use `OffthreadVideo` (not `Video`) — decodes frames in a separate thread
 - Pre-extract segments before rendering (don't seek through long files)
-- Use `codec: "h264"` with `crf: 18` for good quality-size balance
+- The render is an intermediate that `export.sh` re-encodes, so it uses high quality settings (`crf: 16`, `jpegQuality: 92`) and `colorSpace: "bt709"`
+- `--fps 30` halves render time for 60 fps sources; `--concurrency` controls parallel browser tabs
 - Share browser instance across renders (`openBrowser` + `puppeteerInstance`)
 - Bundle once, render many
+
+## Layouts
+
+`VideoFrame.tsx` supports three layouts, chosen by `compute_reframe.py`:
+
+- `fill` — one crop covers the frame; `cropKeyframes` pans it (face or cursor tracking)
+- `framed` — zoomed crop inset near the top over a blurred copy of the video (or black)
+- `split` — two stacked crops from the same source, one per speaker; only the first is unmuted
+
+Safe-zone constants shared by captions and the hook overlay live in `styles/layout.ts`.
+
+## Browser
+
+Remotion downloads Chrome Headless Shell on first use (`npx remotion browser ensure`).
+Set `SHORTS_CHROME` to render with an already-installed Chrome/Chromium instead.
