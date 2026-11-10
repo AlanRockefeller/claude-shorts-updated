@@ -52,10 +52,12 @@ If the input is a URL, download it first (only content the user owns or has the
 right to reuse — ask if that is unclear):
 
 ```bash
-yt-dlp -f "bv*[height<=1080]+ba/b" --merge-output-format mp4 -o "%(title).80s.%(ext)s" "URL"
+yt-dlp -f "bv*[height<=1080]+ba/b" --merge-output-format mp4 -o "%(title).80s.%(ext)s" \
+    --print after_move:filepath "URL"
 ```
 
-Then run:
+It prints the path of the downloaded file: that file, not the URL, is `INPUT` from
+here on. Then run:
 
 ```bash
 bash ROOT/scripts/preflight.sh "INPUT" [OUTPUT_BASE_DIR]

@@ -101,8 +101,11 @@ def test_transcript_is_cached(tmp_path, monkeypatch, capsys):
     transcribe.main()
     assert len(calls) == 2
 
-    summaries = [json.loads(chunk) for chunk in capsys.readouterr().out.strip().split("\n}\n")
-                 if chunk.strip() for chunk in [chunk if chunk.endswith("}") else chunk + "\n}"]]
+    decoder, text, summaries = json.JSONDecoder(), capsys.readouterr().out.strip(), []
+    while text:
+        obj, end = decoder.raw_decode(text)
+        summaries.append(obj)
+        text = text[end:].lstrip()
     assert [s["cached"] for s in summaries] == [False, True, False]
     data = json.loads(out.read_text())
     assert data["version"] == 2 and data["word_count"] == len(data["words"])
